@@ -1,0 +1,16 @@
+{
+  "nodes": [
+    {
+      "id": "inspect",
+      "module": "video.inspect",
+      "inputs": {"video": {"external": "video"}},
+      "parameters": {"timeout_seconds": 600}
+    },
+    {
+      "id": "export",
+      "module": "report.export",
+      "inputs": {"inspection": {"node": "inspect", "output": "manifest"}}
+    }
+  ],
+  "final": "export"
+}
