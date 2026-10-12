@@ -73,11 +73,6 @@ def main(argv: list[str] | None = None) -> int:
                 if not separator or not name or not value or name in inputs:
                     raise PipelineError("Inputs must be unique NAME=PATH bindings")
                 inputs[name] = Path(value)
-        # Relative input paths refer to the user's storage, not the checkout.
-        inputs = {
-            name: path if path.is_absolute() else storage.root / path
-            for name, path in inputs.items()
-        }
         result = Runner(
             storage,
             registry,

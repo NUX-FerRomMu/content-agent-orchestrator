@@ -73,9 +73,10 @@ class VideoIntegrationTests(unittest.TestCase):
     def test_inspect_cfr_audio_and_cache_with_original_unchanged(self):
         source = self.generate("constant.mp4")
         original = digest_file(source)
-        code, stdout, stderr = self.invoke(
-            ["inspect", "artifacts/raw_footages/constant.mp4"]
-        )
+        with contextlib.chdir(self.root):
+            code, stdout, stderr = self.invoke(
+                ["inspect", "artifacts/raw_footages/constant.mp4"]
+            )
         self.assertEqual(code, 0, stderr)
         result = json.loads(stdout)
         report_path = Path(result["outputs"]["report"]["path"])
@@ -144,6 +145,28 @@ class VideoIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(code, 0, stderr)
         self.assertEqual(json.loads(stdout)["status"], "succeeded")
+
+    def test_relative_inputs_use_cwd_for_inspect_and_run(self):
+        source = self.generate("relative.mp4")
+        original = digest_file(source)
+        # A conflicting storage-relative file must not shadow the CWD input.
+        (self.root / source.name).write_bytes(b"not the requested video")
+        example = (
+            Path(__file__).resolve().parents[1] / "examples" / "inspect-video.json"
+        )
+        commands = [
+            ["inspect", source.name],
+            ["run", str(example), "--input", f"video={source.name}"],
+        ]
+        for command in commands:
+            with self.subTest(command=command), contextlib.chdir(self.input_dir):
+                code, stdout, stderr = self.invoke(command)
+                self.assertEqual(code, 0, stderr)
+                report = json.loads(
+                    Path(json.loads(stdout)["outputs"]["report"]["path"]).read_text()
+                )
+                self.assertEqual(report["source"]["sha256"], original[0])
+        self.assertEqual(digest_file(source), original)
 
     def test_invalid_video_retains_diagnostics_and_no_final_output(self):
         source = self.input_dir / "invalid.mp4"

@@ -195,7 +195,7 @@ class Runner:
                         )
                         sources = self._collect(paths, module, result_dir)
                     self._verify_inputs(bound)
-                    published = self._publish(
+                    published, created = self._publish(
                         run_id,
                         node.id,
                         fingerprint,
@@ -215,9 +215,10 @@ class Runner:
                                     (run_id,),
                                 )
                     except BaseException:
-                        # The publication directory belongs only to this attempt.
-                        directory = next(iter(published.values())).path.parent
-                        shutil.rmtree(directory)
+                        # Roll back only a publication created by this attempt.
+                        if created:
+                            directory = next(iter(published.values())).path.parent
+                            shutil.rmtree(directory)
                         raise
                     results[node.id] = published
                     try:
@@ -334,7 +335,8 @@ class Runner:
         sources: dict[str, Artifact],
         work: Path,
         final: bool,
-    ) -> dict[str, Artifact]:
+    ) -> tuple[dict[str, Artifact], bool]:
+        """Return artifacts and whether this attempt created their directory."""
         relative = (
             f"outputs/{run_id}"
             if final
@@ -349,7 +351,7 @@ class Runner:
                     destination, run_id, node_id, fingerprint, sources
                 )
                 if recovered is not None:
-                    return recovered
+                    return recovered, False
             raise ExecutionError(
                 "Publication destination already exists; refusing to overwrite"
             )
@@ -394,7 +396,7 @@ class Runner:
             with marker.open("rb") as stream:
                 os.fsync(stream.fileno())
         staging.rename(destination)
-        return published
+        return published, True
 
     def _recover_publication(
         self,

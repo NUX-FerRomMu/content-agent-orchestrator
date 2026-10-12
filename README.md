@@ -42,9 +42,10 @@ El contenido del usuario queda fuera del checkout:
 ```
 
 Copiar los videos originales a `artifacts/raw_footages/`, o indicar una ruta
-absoluta a un archivo externo. **Las rutas relativas de inputs se interpretan
-respecto de `--root`**, mientras que la ruta del JSON del pipeline se interpreta
-respecto del directorio de trabajo. La CLI crea las carpetas que falten.
+absoluta a un archivo externo. **Todas las rutas relativas, tanto de inputs como
+del JSON del pipeline, se interpretan respecto del directorio de trabajo**.
+`--root` define el almacenamiento de resultados y estado; no cambia la base de
+las rutas de inputs. La CLI crea las carpetas de almacenamiento que falten.
 No admite inputs procedentes de `temps/` ni de `state/`.
 
 ## Inspeccionar un video
@@ -52,7 +53,7 @@ No admite inputs procedentes de `temps/` ni de `state/`.
 ```bash
 uv run --locked python -m content_agent_orchestrator \
   --root /ruta/al/directorio-del-usuario \
-  inspect artifacts/raw_footages/clip.mp4
+  inspect /ruta/al/directorio-del-usuario/artifacts/raw_footages/clip.mp4
 ```
 
 El pipeline integrado ejecuta `video.inspect` y luego `report.export`. Devuelve
@@ -83,7 +84,7 @@ no acumular todos los frames en memoria. No carga imágenes completas en Python.
 uv run --locked python -m content_agent_orchestrator \
   --root /ruta/al/directorio-del-usuario \
   run examples/inspect-video.json \
-  --input video=artifacts/raw_footages/clip.mp4
+  --input video=/ruta/al/directorio-del-usuario/artifacts/raw_footages/clip.mp4
 ```
 
 El ejemplo tiene esta estructura:
@@ -132,7 +133,8 @@ El error y el evento inicial identifican la ejecución; para reanudarla:
 ```bash
 uv run --locked python -m content_agent_orchestrator \
   --root /ruta/al/directorio-del-usuario \
-  inspect artifacts/raw_footages/clip.mp4 --resume <run_id> --cache reuse
+  inspect /ruta/al/directorio-del-usuario/artifacts/raw_footages/clip.mp4 \
+  --resume <run_id> --cache reuse
 ```
 
 La reanudación requiere el mismo pipeline, rutas y versiones. Conserva el

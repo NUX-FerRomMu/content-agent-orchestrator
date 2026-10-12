@@ -242,6 +242,72 @@ class RunnerTests(unittest.TestCase):
             self.run_pipeline(resume=caught.exception.run_id)
         self.assertEqual(existing.read_text(), "preserve")
 
+    def assert_recovered_publication_survives_failure(self, table, condition):
+        result = self.run_pipeline()
+        directory = result.outputs["text"].path.parent
+        original_files = {path.name: path.read_bytes() for path in directory.iterdir()}
+        with self.storage.connect() as connection:
+            connection.execute(
+                "UPDATE runs SET status='running' WHERE id=?", (result.run_id,)
+            )
+            connection.execute(
+                "UPDATE nodes SET status='running', outputs=NULL WHERE run_id=? AND node_id='last'",
+                (result.run_id,),
+            )
+            connection.execute(
+                f"CREATE TRIGGER fail_success BEFORE UPDATE OF status ON {table} "
+                f"WHEN {condition} BEGIN SELECT RAISE(FAIL, 'simulated database failure'); END"
+            )
+        try:
+            with self.assertRaisesRegex(RunFailed, "simulated database failure"):
+                self.run_pipeline(resume=result.run_id)
+            files = (
+                {path.name: path.read_bytes() for path in directory.iterdir()}
+                if directory.exists()
+                else {}
+            )
+            self.assertEqual(files, original_files)
+            self.assertTrue((self.root / "temps" / result.run_id / "last").is_dir())
+        finally:
+            with self.storage.connect() as connection:
+                connection.execute("DROP TRIGGER fail_success")
+        recovered = self.run_pipeline(resume=result.run_id)
+        self.assertEqual(
+            recovered.outputs["text"].path.read_bytes(), original_files["text.txt"]
+        )
+
+    def test_recovered_output_survives_checkpoint_failure(self):
+        self.assert_recovered_publication_survives_failure(
+            "nodes", "NEW.node_id='last' AND NEW.status='succeeded'"
+        )
+
+    def test_recovered_output_survives_run_status_failure(self):
+        self.assert_recovered_publication_survives_failure(
+            "runs", "NEW.status='succeeded'"
+        )
+
+    def test_new_output_is_removed_on_checkpoint_failure(self):
+        self.storage.initialize()
+        with self.storage.connect() as connection:
+            connection.execute(
+                "CREATE TRIGGER fail_success BEFORE UPDATE OF status ON nodes "
+                "WHEN NEW.node_id='last' AND NEW.status='succeeded' "
+                "BEGIN SELECT RAISE(FAIL, 'simulated database failure'); END"
+            )
+        with self.assertRaisesRegex(RunFailed, "simulated database failure") as caught:
+            self.run_pipeline()
+        self.assertFalse((self.root / "outputs" / caught.exception.run_id).exists())
+        self.assertTrue(
+            (
+                self.root
+                / "temps"
+                / caught.exception.run_id
+                / "last"
+                / "result"
+                / "text.txt"
+            ).is_file()
+        )
+
     def test_resume_rejects_changed_configuration_and_completed_run(self):
         completed = self.run_pipeline()
         with self.assertRaisesRegex(PipelineError, "already completed"):
