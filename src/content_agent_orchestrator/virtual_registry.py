@@ -148,7 +148,8 @@ class VirtualRegistry:
                         "Generation cache checksum or request mismatch; inspect retained temporaries"
                     )
             else:
-                content = generator.generate(portrait_prompt(profile), work)
+                prompt_builder = getattr(generator, "prompt", portrait_prompt)
+                content = generator.generate(prompt_builder(profile), work)
                 # An incomplete image or missing journal never counts as reusable generation.
                 portrait.unlink(missing_ok=True)
                 private_write(portrait, content)

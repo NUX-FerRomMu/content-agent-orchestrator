@@ -9,12 +9,14 @@ from pathlib import Path
 
 from .contracts import ExecutionError, PipelineError
 from .face_data import bundled_yunet, read_json
+from .generation_models import MODEL_REPOSITORIES, prepare_model
 from .identity_data import bundled_sface, validate_snapshot
 from .identity_registry import IdentityRegistry
 from .modules import builtin_registry
 from .pipeline import Pipeline
-from .portrait_generators import CommandPortraitGenerator, OpenAIPortraitGenerator
+from .portrait_generators import CommandPortraitGenerator
 from .runner import Runner
+from .sdxl_generator import SDXLPortraitGenerator
 from .storage import UserStorage
 from .virtual_registry import VirtualRegistry
 
@@ -104,8 +106,16 @@ def main(argv: list[str] | None = None) -> int:
     create = virtual_actions.add_parser("create")
     create.add_argument("identity_id")
     create.add_argument("--profile", type=Path, required=True)
-    create.add_argument("--backend", choices=("openai", "command"), default="openai")
-    create.add_argument("--model", default="gpt-image-1")
+    create.add_argument("--backend", choices=("sdxl", "command"), default="sdxl")
+    create.add_argument(
+        "--model-dir", type=Path, help="Directory returned by virtual prepare-model"
+    )
+    create.add_argument("--seed", type=int, default=42)
+    create.add_argument("--steps", type=int, default=30)
+    create.add_argument("--device", choices=("cuda", "cpu"), default="cuda")
+    create.add_argument(
+        "--offload", action=argparse.BooleanOptionalAction, default=True
+    )
     create.add_argument("--cache", choices=("reuse", "fresh"), default="reuse")
     create.add_argument(
         "--generator", type=Path, help="Local command configuration JSON"
@@ -120,6 +130,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     virtual_actions.add_parser("list")
     virtual_actions.add_parser("snapshot")
+    prepare = virtual_actions.add_parser(
+        "prepare-model",
+        help="Explicit download and checksum verification of open SDXL weights",
+    )
+    prepare.add_argument(
+        "--model", choices=tuple(MODEL_REPOSITORIES), default="realvis-xl"
+    )
+    prepare.add_argument("--revision", default="main")
     identity = commands.add_parser(
         "identity", help="Explicit local identity enrollment and management"
     )
@@ -152,6 +170,14 @@ def main(argv: list[str] | None = None) -> int:
     try:
         registry = builtin_registry()
         storage = UserStorage(args.root)
+        if args.command == "virtual" and args.virtual_action == "prepare-model":
+            path = prepare_model(storage, args.model, args.revision)
+            print(
+                json.dumps(
+                    {"model_dir": str(path), "generation_is_offline": True}, indent=2
+                )
+            )
+            return 0
         if args.command == "virtual":
             faces = VirtualRegistry(storage)
             if args.virtual_action == "create":
@@ -166,7 +192,16 @@ def main(argv: list[str] | None = None) -> int:
                         raise PipelineError(
                             "--generator is only for the command backend"
                         )
-                    generator = OpenAIPortraitGenerator(args.model)
+                    model_dir = args.model_dir or storage.path(
+                        "artifacts/models/unprepared"
+                    )
+                    generator = SDXLPortraitGenerator(
+                        model_dir,
+                        seed=args.seed,
+                        steps=args.steps,
+                        device=args.device,
+                        offload=args.offload,
+                    )
                 payload = faces.create(
                     args.identity_id,
                     read_json(args.profile),

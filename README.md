@@ -172,10 +172,11 @@ parámetros, eliminación y límites de privacidad en
 ## Crear y reutilizar un rostro virtual
 
 `virtual create <identity_id> --profile /ruta/perfil.json` crea un candidato B
-para una persona A registrada, usando una API de imágenes o un generador local
+para una persona A registrada, usando SDXL local o un generador local
 externo. El perfil define género, tono de piel, edad adulta y preferencias como
-maquillaje o delineado. La generación por API requiere `OPENAI_API_KEY` y envía
-solamente ese perfil; no envía el rostro A ni sus embeddings.
+maquillaje o delineado. `virtual prepare-model` descarga y verifica
+un checkpoint fotorealista RealVisXL o SDXL base. Crear B usa esos pesos
+localmente, sin API de imágenes ni transmisión del rostro A.
 
 Después de revisar la imagen, `virtual approve <identity_id> <candidate_id>
 --reviewed` asocia B de forma inmutable. Se validan geometría y separación
@@ -272,6 +273,6 @@ se marcan como omitidas; una validación completa requiere tenerlos instalados.
 Los siguientes módulos serán reemplazo facial, validación visual, corrección conservadora y exportación
 verificada. El intercambio de voz podrá incorporarse después como otro módulo.
 El análisis usa CPU, con modelos incluidos, y no envía videos a servicios externos.
-La generación de B puede usar una API de imágenes o un generador externo local.
+La generación de B usa SDXL local o un generador externo local.
 Los inputs, temporales, registro y embeddings deben tratarse como material
 sensible; el directorio del usuario debe estar en almacenamiento privado.

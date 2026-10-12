@@ -1,6 +1,3 @@
-import base64
-import contextlib
-import io
 import json
 import os
 import struct
@@ -8,11 +5,10 @@ import subprocess
 import sys
 import tempfile
 import unittest
-import urllib.error
 import zipfile
 from pathlib import Path
 from typing import ClassVar
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import cv2
 import numpy as np
@@ -23,9 +19,8 @@ from content_agent_orchestrator.identity_data import RECOGNIZER, bundled_sface
 from content_agent_orchestrator.modules.face_embed import FaceEmbedding
 from content_agent_orchestrator.portrait_generators import (
     CommandPortraitGenerator,
-    NoRedirect,
-    OpenAIPortraitGenerator,
 )
+from content_agent_orchestrator.sdxl_generator import SDXLPortraitGenerator
 from content_agent_orchestrator.storage import UserStorage, digest_file
 from content_agent_orchestrator.virtual_catalog import read_catalog
 from content_agent_orchestrator.virtual_face import (
@@ -190,7 +185,10 @@ class VirtualRegistryTests(unittest.TestCase):
         self.assertTrue(again["reused"])
         self.assertEqual(again["virtual_id"], approved["virtual_id"])
         reused = self.registry.create(
-            self.identity_id, PROFILE, OpenAIPortraitGenerator(), cache="fresh"
+            self.identity_id,
+            PROFILE,
+            SDXLPortraitGenerator(self.root / "unprepared"),
+            cache="fresh",
         )
         self.assertEqual(reused["portrait_sha256"], approved["portrait_sha256"])
         self.assertEqual(reused["virtual_id"], approved["virtual_id"])
@@ -405,79 +403,6 @@ class GeneratorTests(unittest.TestCase):
         _, content = cv2.imencode(".png", np.zeros((512, 512, 3), np.uint8))
         with self.assertRaisesRegex(ExecutionError, "exactly one"):
             validate_portrait(content.tobytes())
-
-    def test_cloud_request_is_prompt_only_and_returns_png(self):
-        response = Mock()
-        response.read.return_value = json.dumps(
-            {"data": [{"b64_json": base64.b64encode(FIXTURE.read_bytes()).decode()}]}
-        ).encode()
-        response.__enter__ = Mock(return_value=response)
-        response.__exit__ = Mock(return_value=False)
-        opener = Mock()
-        opener.open.return_value = response
-        with (
-            patch.dict(os.environ, {"OPENAI_API_KEY": "fake-test-key"}, clear=True),
-            patch("urllib.request.build_opener", return_value=opener),
-        ):
-            content = OpenAIPortraitGenerator().generate(
-                portrait_prompt(PROFILE), Path("unused")
-            )
-        self.assertEqual(content, FIXTURE.read_bytes())
-        request = opener.open.call_args.args[0]
-        payload = json.loads(request.data)
-        self.assertEqual(
-            set(payload),
-            {"model", "size", "quality", "output_format", "background", "prompt", "n"},
-        )
-        self.assertEqual(
-            request.full_url, "https://api.openai.com/v1/images/generations"
-        )
-        self.assertNotIn("fake-test-key", request.data.decode())
-        self.assertIsNone(
-            NoRedirect().redirect_request(
-                None, None, 307, "", None, "https://example.com"
-            )
-        )
-
-    def test_cloud_errors_do_not_print_secrets_or_response_body(self):
-        opener = Mock()
-        opener.open.side_effect = urllib.error.HTTPError(
-            "https://api.openai.com",
-            400,
-            "private-body",
-            {},
-            io.BytesIO(b"fake-test-key"),
-        )
-        with (
-            patch.dict(os.environ, {"OPENAI_API_KEY": "fake-test-key"}, clear=True),
-            patch("urllib.request.build_opener", return_value=opener),
-            self.assertRaisesRegex(ExecutionError, "HTTP error 400") as caught,
-        ):
-            OpenAIPortraitGenerator().generate("fictional adult", Path("unused"))
-        self.assertNotIn("private-body", str(caught.exception))
-        self.assertNotIn("fake-test-key", str(caught.exception))
-        self.assertEqual(opener.open.call_count, 1)
-
-    def test_cloud_generation_requires_key_and_rejects_url_responses(self):
-        with (
-            patch.dict(os.environ, {}, clear=True),
-            self.assertRaisesRegex(ExecutionError, "OPENAI_API_KEY"),
-        ):
-            OpenAIPortraitGenerator().generate("fictional adult", Path("unused"))
-        response = contextlib.nullcontext(
-            Mock(
-                read=Mock(
-                    return_value=b'{"data":[{"url":"https://untrusted.example/photo"}]}'
-                )
-            )
-        )
-        opener = Mock(open=Mock(return_value=response))
-        with (
-            patch.dict(os.environ, {"OPENAI_API_KEY": "fake-test-key"}, clear=True),
-            patch("urllib.request.build_opener", return_value=opener),
-            self.assertRaisesRegex(ExecutionError, "base64"),
-        ):
-            OpenAIPortraitGenerator().generate("fictional adult", Path("unused"))
 
     def test_local_command_contract_generates_png_without_shell(self):
         with tempfile.TemporaryDirectory() as temporary:

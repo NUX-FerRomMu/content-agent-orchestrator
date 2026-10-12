@@ -1,83 +1,11 @@
 """Prompt-only generators; source videos and embeddings are never sent."""
 
-import base64
-import json
-import os
 import subprocess
-import urllib.error
-import urllib.request
 from pathlib import Path
 
 from .contracts import ExecutionError, PipelineError
 from .pipeline import canonical_json
-from .virtual_face import MAX_PNG_BYTES, read_portrait
-
-
-class NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, request, file, code, message, headers, new_url):
-        return None
-
-
-class OpenAIPortraitGenerator:
-    def __init__(self, model="gpt-image-1", *, timeout=300):
-        if model not in ("gpt-image-1", "gpt-image-1.5", "gpt-image-1-mini"):
-            raise PipelineError("Unsupported image generation model")
-        self.descriptor = {
-            "backend": "openai",
-            "model": model,
-            "size": "1024x1024",
-            "quality": "high",
-            "output_format": "png",
-            "background": "opaque",
-        }
-        self.timeout = timeout
-
-    def generate(self, prompt: str, directory: Path) -> bytes:
-        key = os.environ.get("OPENAI_API_KEY")
-        if not key:
-            raise ExecutionError(
-                "Set OPENAI_API_KEY in the environment for cloud generation"
-            )
-        request = urllib.request.Request(
-            "https://api.openai.com/v1/images/generations",
-            data=canonical_json(
-                {
-                    key: value
-                    for key, value in self.descriptor.items()
-                    if key != "backend"
-                }
-                | {"prompt": prompt, "n": 1}
-            ).encode(),
-            headers={
-                "Authorization": f"Bearer {key}",
-                "Content-Type": "application/json",
-            },
-            method="POST",
-        )
-        try:
-            opener = urllib.request.build_opener(NoRedirect())
-            with opener.open(request, timeout=self.timeout) as response:
-                encoded = response.read(24 * 1024 * 1024 + 1)
-            if len(encoded) > 24 * 1024 * 1024:
-                raise ExecutionError("Image provider response exceeds the size limit")
-            payload = json.loads(encoded)
-            content = base64.b64decode(payload["data"][0]["b64_json"], validate=True)
-            if len(content) > MAX_PNG_BYTES:
-                raise ExecutionError("Generated portrait exceeds the size limit")
-            return content
-        except urllib.error.HTTPError as exc:
-            # Never echo provider bodies or request headers; they can contain secrets.
-            raise ExecutionError(
-                f"Image generation HTTP error {exc.code}; no automatic retry"
-            ) from None
-        except (urllib.error.URLError, TimeoutError, OSError):
-            raise ExecutionError(
-                "Image generation transport failed; a request may already have been billed"
-            ) from None
-        except (ValueError, TypeError, KeyError, IndexError):
-            raise ExecutionError(
-                "Image provider did not return a valid base64 PNG"
-            ) from None
+from .virtual_face import read_portrait
 
 
 class CommandPortraitGenerator:

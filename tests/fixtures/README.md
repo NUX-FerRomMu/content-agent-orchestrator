@@ -37,5 +37,6 @@ prove that the image resembles no real person.
 - Size: 2,082,644 bytes; dimensions: 1254×1254 RGB PNG.
 - SHA-256: `6c075392f5b27ba0f612f8e3de39400a89eb22a7727686e170490f05cf31a1c4`.
 - Its actual pixels are checked with YuNet/SFace for usability and separation
-  from the existing public-domain source fixtures. Tests of the cloud HTTP
-  adapter mock network responses; the local command adapter runs real subprocesses.
+  from the existing public-domain source fixtures. This historical static fixture is reused without calling
+  any image generation service. Model-download/inference tests mock remote responses
+  and GPU execution; the local command adapter runs real subprocesses.

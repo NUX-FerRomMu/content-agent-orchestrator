@@ -30,28 +30,78 @@ ficticia adulta, sin anteojos ni rasgos excéntricos, frontal, bien iluminada,
 sin oclusiones y con expresión neutral. El texto libre se trata como preferencias
 subordinadas a esas condiciones.
 
-## Crear un candidato en la nube
+## Preparar el generador local
 
-Con A registrado mediante `identity register`, ejecutar:
+El backend predeterminado es SDXL local. `realvis-xl` selecciona
+[RealVisXL V5.0](https://huggingface.co/SG161222/RealVisXL_V5.0), un checkpoint
+SDXL orientado al fotorealismo, útil para retratos. No es un modelo exclusivo de
+caras. `sdxl-base` permite usar el
+[SDXL 1.0 original](https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0).
+Los modelos puramente faciales como StyleGAN3 no se integran: no proporcionan
+el mismo control por prompt y su licencia limita el uso comercial.
+
+La generación necesita PyTorch, Diffusers, Transformers, Accelerate y
+Safetensors. Esas dependencias son opcionales; la inspección, el reconocimiento
+y la asignación de B ya aprobadas usan el entorno liviano. Su incorporación
+al grupo `generation` requiere autorización según AGENTS.md.
+
+La preparación es una descarga explícita:
 
 ```bash
 export PYTHONPATH=src
 uv run --locked python -m content_agent_orchestrator --root /datos/influencer \
-  virtual create <identity_id_A> --profile /ruta/perfil.json
+  virtual prepare-model --model realvis-xl
 ```
 
-Requiere `OPENAI_API_KEY` en el entorno, acceso a la API de imágenes de OpenAI
-y conectividad HTTPS a `api.openai.com`. No lee archivos `.env`. El modelo por
-defecto es `gpt-image-1`; `--model` también permite `gpt-image-1.5` y
-`gpt-image-1-mini`. Solicita una imagen PNG opaca de 1024×1024 y calidad alta.
-La API puede tener costo y requisitos de acceso según la cuenta. **Solamente
-envía el prompt del perfil: no envía A, videos, aliases, IDs ni embeddings.**
+`--revision` permite elegir una revisión. `main` se resuelve a un commit
+inmutable en el momento de preparar; no se consulta durante la generación.
+Antes de descargar se comprueba que el repositorio declare la licencia
+CreativeML Open RAIL++-M (`openrail++`) y que no requiera acceso cerrado.
+Si no puede verificarse esa licencia, se rechaza la preparación. La etiqueta
+especifica una licencia con restricciones de uso; no equivale a dominio público.
+La copia conserva README y archivos de licencia publicados para revisión.
 
-El cliente usa la biblioteca estándar, rechaza redirects, limita la respuesta,
-acepta bytes base64 y nunca descarga URLs retornadas por el proveedor. Los
-errores no muestran claves, cuerpos de respuestas ni headers. No hay reintentos
-automáticos de solicitudes cobrables; un timeout puede ocurrir después de que
-el proveedor haya procesado la solicitud.
+Se guardan solamente configuración, tokenizadores y pesos `safetensors`.
+Cada archivo se verifica contra SHA-256 LFS o hash Git publicado por el
+repositorio. Un manifiesto registra también SHA-256 locales, tamaños y commit.
+Los archivos completos se reutilizan tras un fallo; descargas parciales se
+conservan como diagnóstico y se reinician. Un modelo incompleto no se publica.
+La descarga se limita a 24 GiB y el directorio completo se publica con rename.
+
+El resultado devuelve `model_dir` bajo
+`artifacts/models/<modelo>/<commit>/`. Los pesos grandes quedan en el directorio
+del usuario y nunca se agregan al repositorio. El runtime rechaza archivos
+sin verificar, symlinks y formatos que requieran pickle o código remoto.
+La preparación requiere HTTPS a Hugging Face y a los hosts de descarga
+indicados por el proveedor; no necesita una clave de API de imágenes.
+
+## Crear B sin servicios de generación
+
+Con A registrado mediante `identity register`, ejecutar:
+
+```bash
+uv run --locked python -m content_agent_orchestrator --root /datos/influencer \
+  virtual create <identity_id_A> --profile /ruta/perfil.json \
+  --model-dir /ruta/devuelta/por/prepare-model
+```
+
+La generación usa exclusivamente esos archivos locales: `local_files_only=True`
+y `use_safetensors=True`. No hay backend de OpenAI, no se lee `OPENAI_API_KEY`
+y no se envían prompts, A, videos ni embeddings a un proveedor de imágenes.
+Puede ejecutarse en una PC o en una máquina de nube con GPU NVIDIA compatible.
+
+La configuración inicial usa CUDA FP16, 1024×1024, 30 pasos, guidance 5 y
+DPM-Solver++ con Karras. VAE slicing/tiling y CPU offload están habilitados
+para reducir VRAM. `--seed`, `--steps` y `--offload/--no-offload` permiten ajustar
+la ejecución; se registran en la procedencia y la clave del job. Apunta a una
+GPU de 16 GB, pero este entorno no tiene GPU disponible para medir su consumo.
+`--device cpu` es un fallback explícito FP32 mucho más lento y con alto uso de RAM.
+
+SDXL recibe un prompt compacto con los atributos requeridos antes de las
+preferencias cosméticas y un prompt negativo contra menores, anteojos,
+oclusiones y deformaciones. Se comprueba el límite de **ambos** tokenizadores
+CLIP; un texto demasiado largo se rechaza antes de inferir, en lugar de truncar
+silenciosamente atributos. Acortar `features` si excede ese límite.
 
 El resultado incluye `candidate_id`, `portrait_path` y
 `status: needs_visual_review`. El candidato queda en
@@ -98,9 +148,8 @@ reemplaza silenciosamente la identidad del influencer.
 
 `--backend command --generator /ruta/generador.json` ejecuta un generador externo
 de confianza, instalado por el usuario en su propio entorno (por ejemplo, un
-adaptador a un servidor ComfyUI o a un modelo local). Este PR no instala modelos
-de difusión, CUDA ni un servidor local; no valida consumo de VRAM de un modelo
-particular. La aplicación no agrega dependencias Python.
+adaptador a un servidor ComfyUI o a un modelo local). Este adaptador permite usar otro entorno o servidor. No instala sus
+dependencias ni ejecuta un servidor automáticamente.
 
 El JSON configura el comando, identificación/versionado del modelo y semilla:
 
@@ -125,10 +174,9 @@ Se conservan los archivos que el generador haya creado en su workspace al fallar
 Los jobs usan `temps/virtual_generation/<hash-del-pedido>/` con lock por pedido.
 Después de recibir la imagen, se guarda PNG y checkpoint con checksum antes
 de validar. Si la validación falla o se interrumpe, otro `create` idéntico
-reutiliza la imagen completa; no vuelve a cobrar su generación. Un checkpoint
-incompleto o con checksum incorrecto no se reutiliza. Si falló la conexión
-antes de guardar una respuesta completa, ejecutar de nuevo puede cobrar otra
-solicitud; no es posible recuperar ese resultado desde esta aplicación.
+reutiliza la imagen completa; no vuelve a ejecutar la difusión. Un checkpoint
+incompleto o con checksum incorrecto no se reutiliza. Si falló el generador
+antes de guardar una imagen completa, ejecutar de nuevo reinicia la inferencia.
 
 `virtual create ... --cache fresh` elimina solamente los temporales del pedido
 correspondiente y permite volver a intentar una generación fallida. No borra
