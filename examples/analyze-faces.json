@@ -1,0 +1,39 @@
+{
+  "nodes": [
+    {
+      "id": "inspect",
+      "module": "video.inspect",
+      "inputs": {"video": {"external": "video"}}
+    },
+    {
+      "id": "detect",
+      "module": "face.detect",
+      "inputs": {
+        "video": {"external": "video"},
+        "model": {"external": "detector"},
+        "inspection": {"node": "inspect", "output": "manifest"},
+        "timestamps": {"node": "inspect", "output": "timestamps"}
+      },
+      "parameters": {"max_dimension": 640, "score_threshold": 0.85}
+    },
+    {
+      "id": "track",
+      "module": "face.track",
+      "inputs": {
+        "frames": {"node": "detect", "output": "frames"},
+        "summary": {"node": "detect", "output": "summary"}
+      }
+    },
+    {
+      "id": "report",
+      "module": "face.report",
+      "inputs": {
+        "summary": {"node": "track", "output": "summary"},
+        "frames": {"node": "track", "output": "frames"},
+        "tracks": {"node": "track", "output": "tracks"},
+        "intervals": {"node": "track", "output": "intervals"}
+      }
+    }
+  ],
+  "final": "report"
+}

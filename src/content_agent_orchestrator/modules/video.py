@@ -11,11 +11,12 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from ..contracts import Artifact, ExecutionError, ModuleContext, PipelineError
+from ..storage import digest_file
 
 
 class VideoInspection:
     name = "video.inspect"
-    version = "1"
+    version = "2"
     input_kinds: ClassVar = {"video": "video.source"}
     output_kinds: ClassVar = {
         "manifest": "video.manifest",
@@ -238,6 +239,7 @@ class VideoInspection:
         manifest = {
             "schema_version": 1,
             "source": {"sha256": source.sha256, "size_bytes": source.size},
+            "timestamps_sha256": digest_file(timestamps_path)[0],
             "primary_video_stream": primary["index"],
             "container": {
                 key: metadata.get("format", {})[key]

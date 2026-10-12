@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from .contracts import ExecutionError, PipelineError
+from .face_data import bundled_yunet
 from .modules import builtin_registry
 from .pipeline import Pipeline
 from .runner import Runner
@@ -48,10 +49,28 @@ def main(argv: list[str] | None = None) -> int:
         "inspect", help="Inspect a video and export its report"
     )
     inspect.add_argument("video", type=Path)
+    analyze = commands.add_parser(
+        "analyze-faces",
+        help="Detect and track faces; export metadata, not an anonymized video",
+    )
+    analyze.add_argument("video", type=Path)
+    analyze.add_argument(
+        "--model",
+        type=Path,
+        default=bundled_yunet(),
+        help="Pinned YuNet model (bundled by default)",
+    )
+    analyze.add_argument(
+        "--max-dimension",
+        type=int,
+        default=640,
+        help="Maximum detection image dimension, a multiple of 32",
+    )
+    analyze.add_argument("--score-threshold", type=float, default=0.85)
     run = commands.add_parser("run", help="Run a JSON pipeline")
     run.add_argument("pipeline", type=Path)
     run.add_argument("--input", action="append", default=[], metavar="NAME=PATH")
-    for command in (inspect, run):
+    for command in (inspect, analyze, run):
         command.add_argument("--cache", choices=("reuse", "fresh"), default="reuse")
         command.add_argument(
             "--resume",
@@ -65,6 +84,17 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "inspect":
             pipeline = Pipeline.parse(inspection_definition(), registry)
             inputs = {"video": args.video}
+        elif args.command == "analyze-faces":
+            pipeline = Pipeline.parse(
+                face_analysis_definition(
+                    {
+                        "max_dimension": args.max_dimension,
+                        "score_threshold": args.score_threshold,
+                    }
+                ),
+                registry,
+            )
+            inputs = {"video": args.video, "detector": args.model}
         else:
             pipeline = Pipeline.load(args.pipeline, registry)
             inputs = {}
@@ -104,3 +134,46 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         print("Interrupted; temporaries and checkpoints are retained", file=sys.stderr)
         return 130
+
+
+def face_analysis_definition(
+    detection_parameters: dict | None = None, tracking_parameters: dict | None = None
+) -> dict:
+    return {
+        "nodes": [
+            {
+                "id": "inspect",
+                "module": "video.inspect",
+                "inputs": {"video": {"external": "video"}},
+            },
+            {
+                "id": "detect",
+                "module": "face.detect",
+                "inputs": {
+                    "video": {"external": "video"},
+                    "model": {"external": "detector"},
+                    "inspection": {"node": "inspect", "output": "manifest"},
+                    "timestamps": {"node": "inspect", "output": "timestamps"},
+                },
+                "parameters": detection_parameters or {},
+            },
+            {
+                "id": "track",
+                "module": "face.track",
+                "inputs": {
+                    "frames": {"node": "detect", "output": "frames"},
+                    "summary": {"node": "detect", "output": "summary"},
+                },
+                "parameters": tracking_parameters or {},
+            },
+            {
+                "id": "report",
+                "module": "face.report",
+                "inputs": {
+                    name: {"node": "track", "output": name}
+                    for name in ("summary", "frames", "tracks", "intervals")
+                },
+            },
+        ],
+        "final": "report",
+    }

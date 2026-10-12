@@ -1,16 +1,17 @@
 # Content Agent Orchestrator
 
 Coordinador de pipelines de módulos componibles. Cada pipeline es un DAG que
-converge en **un único nodo final**. Esta primera entrega permite inspeccionar
-videos y exportar informes; todavía no implementa reconocimiento de personas,
-generación de identidades, intercambio facial ni validación de anonimización.
+converge en **un único nodo final**. Permite inspeccionar videos, detectar y
+seguir rostros dentro de cada clip y exportar informes. El reconocimiento de
+personas entre videos, las identidades virtuales y el intercambio facial serán
+etapas posteriores.
 
 ## Requisitos y preparación
 
 - Python 3.12, según `.python-version`.
 - [uv](https://docs.astral.sh/uv/).
 - FFmpeg y FFprobe disponibles en `PATH`. FFprobe se usa durante la inspección;
-  FFmpeg se usa para generar los videos de las pruebas de integración.
+  FFmpeg decodifica frames para la detección y genera videos de prueba.
 
 Desde la carpeta del repositorio:
 
@@ -20,7 +21,7 @@ export PYTHONPATH=src
 ```
 
 En PowerShell, usar `$env:PYTHONPATH = "src"` en lugar de `export`. El proyecto
-usa `.venv` y no incorpora nuevas dependencias de Python. Al no tener todavía un
+usa `.venv`, NumPy y OpenCV headless, con versiones fijadas en `uv.lock`. Al no tener todavía un
 backend de empaquetado, `PYTHONPATH=src` permite ejecutar el paquete desde el checkout.
 
 ## Directorio del usuario
@@ -117,6 +118,31 @@ es secuencial; permite ramas convergentes, pero todavía no ejecuta en paralelo.
 `timeout_seconds` limita cada llamada a FFprobe y puede ajustarse entre 1 y
 86400 segundos para videos largos.
 
+## Detectar y seguir rostros
+
+```bash
+uv run --locked python -m content_agent_orchestrator \
+  --root /ruta/al/directorio-del-usuario \
+  analyze-faces /ruta/al/directorio-del-usuario/artifacts/raw_footages/clip.mp4
+```
+
+Ejecuta `video.inspect → face.detect → face.track → face.report`, con un único
+nodo final. YuNet está incluido con su licencia MIT y checksum verificado; el
+procesamiento usa CPU y no requiere descargas ni servicios externos. El detector
+trabaja con frames reducidos en memoria y devuelve coordenadas del video original,
+incluidas rotaciones de cámara de 90°, 180° y 270°. El archivo fuente permanece intacto.
+
+Los outputs son un informe JSON y archivos JSONL con trayectorias por frame,
+resúmenes de tracks e intervalos sin detecciones o con asociaciones ambiguas.
+Los `track_id` tienen alcance dentro de un clip; todavía no identifican personas
+entre videos. **Este comando analiza rostros; no produce un video anonimizado.**
+
+Se puede ajustar `--score-threshold` (por defecto 0.85) y `--max-dimension`
+(por defecto 640). Para configurar tracking o checkpoints, usar
+[examples/analyze-faces.json](examples/analyze-faces.json). Los contratos,
+parámetros, outputs y recuperación se describen en
+[docs/face-analysis.md](docs/face-analysis.md).
+
 ## Caché, fallos y reanudación
 
 `--cache reuse` es el modo por defecto. Los resultados completos se pueden
@@ -141,7 +167,11 @@ La reanudación requiere el mismo pipeline, rutas y versiones. Conserva el
 workspace fallido solamente si sus inputs siguen coincidiendo. Cada módulo es
 responsable de interpretar su caché interna; la inspección actualmente repite
 las llamadas a FFprobe tras un fallo. Los archivos de `result/` incompletos
-siempre se descartan y nunca cuentan como resultados exitosos.
+siempre se descartan y nunca cuentan como resultados exitosos. `face.detect`
+reutiliza bloques completos con checksum verificado; al reanudar vuelve a
+decodificar desde el principio para conservar el orden, pero omite la inferencia
+de los bloques ya confirmados. `face.track` y los informes reinician su pasada
+de metadatos si fallan.
 
 `--cache fresh` desactiva la reutilización. Combinado con `--resume`, elimina y
 recrea los temporales de los nodos de **esa ejecución**, sin borrar el trabajo
@@ -193,10 +223,10 @@ se marcan como omitidas; una validación completa requiere tenerlos instalados.
 
 ## Alcance siguiente
 
-Los siguientes módulos serán detección/seguimiento, resolución de identidades
-en una base persistente, creación/recuperación de identidad virtual,
+Los siguientes módulos serán resolución de identidades en una base persistente,
+creación/recuperación de identidad virtual,
 reemplazo facial, validación visual, corrección conservadora y exportación
 verificada. El intercambio de voz podrá incorporarse después como otro módulo.
-Esta entrega no usa GPU, descarga modelos ni envía videos a servicios externos.
+El análisis actual usa CPU, con el modelo incluido, y no envía videos a servicios externos.
 Los inputs, temporales y futuros embeddings deben tratarse como material
 sensible; el directorio del usuario debe estar en almacenamiento privado.
