@@ -3,8 +3,8 @@
 Coordinador de pipelines de módulos componibles. Cada pipeline es un DAG que
 converge en **un único nodo final**. Permite inspeccionar videos, detectar y
 seguir rostros dentro de cada clip, reconocer personas registradas entre videos
-y exportar informes. Las identidades virtuales y el intercambio facial serán
-etapas posteriores.
+y generar identidades virtuales persistentes. El intercambio facial y la
+validación de anonimización del video serán etapas posteriores.
 
 ## Requisitos y preparación
 
@@ -35,7 +35,10 @@ El contenido del usuario queda fuera del checkout:
 ├── artifacts/
 │   ├── raw_footages/                      # videos fuente
 │   ├── runs/<run_id>/<node>/<attempt>/    # resultados intermedios privados
-│   └── identity_registry/<sha256>.json    # snapshots biométricos privados
+│   ├── identity_registry/<sha256>.json    # snapshots biométricos privados
+│   ├── virtual_candidates/<hash>/        # rostros B pendientes de revisión
+│   ├── virtual_faces/<virtual_id>/        # retratos B aprobados
+│   └── virtual_registry/<sha256>.zip     # catálogos con píxeles de B
 ├── temps/<run_id>/<node>/                 # trabajo recuperable
 ├── outputs/<run_id>/                     # archivos del único nodo final
 └── state/
@@ -166,6 +169,26 @@ registro invalidan la caché de resolución. Consultar el flujo completo,
 parámetros, eliminación y límites de privacidad en
 [docs/identity-recognition.md](docs/identity-recognition.md).
 
+## Crear y reutilizar un rostro virtual
+
+`virtual create <identity_id> --profile /ruta/perfil.json` crea un candidato B
+para una persona A registrada, usando una API de imágenes o un generador local
+externo. El perfil define género, tono de piel, edad adulta y preferencias como
+maquillaje o delineado. La generación por API requiere `OPENAI_API_KEY` y envía
+solamente ese perfil; no envía el rostro A ni sus embeddings.
+
+Después de revisar la imagen, `virtual approve <identity_id> <candidate_id>
+--reviewed` asocia B de forma inmutable. Se validan geometría y separación
+biométrica respecto de las personas registradas. Repetir la creación reutiliza
+el mismo PNG: mantener la identidad no depende de regenerar el mismo prompt.
+
+`assign-virtual-faces /ruta/clip.mp4` extiende el DAG con `virtual.resolve →
+virtual.report`, conservando un único final. Publica asignaciones por frame y
+las caras sintéticas seleccionadas, sin intercambiar todavía el video. Casos
+desconocidos o ambiguos permanecen sin target. Consultar comandos, revisión
+visual, caché, backend local y límites en
+[docs/virtual-identities.md](docs/virtual-identities.md).
+
 ## Caché, fallos y reanudación
 
 `--cache reuse` es el modo por defecto. Los resultados completos se pueden
@@ -246,9 +269,9 @@ se marcan como omitidas; una validación completa requiere tenerlos instalados.
 
 ## Alcance siguiente
 
-Los siguientes módulos serán creación/recuperación de identidad virtual,
-reemplazo facial, validación visual, corrección conservadora y exportación
+Los siguientes módulos serán reemplazo facial, validación visual, corrección conservadora y exportación
 verificada. El intercambio de voz podrá incorporarse después como otro módulo.
-El análisis actual usa CPU, con el modelo incluido, y no envía videos a servicios externos.
+El análisis usa CPU, con modelos incluidos, y no envía videos a servicios externos.
+La generación de B puede usar una API de imágenes o un generador externo local.
 Los inputs, temporales, registro y embeddings deben tratarse como material
 sensible; el directorio del usuario debe estar en almacenamiento privado.

@@ -279,15 +279,19 @@ class IdentityRegistry:
                 raise PipelineError("Identity does not exist")
             connection.execute("UPDATE metadata SET revision = revision + 1")
             # Old snapshots contain biometric references even after a DB deletion.
-            directory = self.storage.path("artifacts/identity_registry")
-            if directory.exists():
-                for name in directory.glob("*.json"):
-                    path = self.storage.path(name.relative_to(self.storage.root))
-                    # This directory is reserved for managed snapshots. Purge
-                    # malformed snapshots too: corruption must not retain references.
-                    path.unlink()
+            for relative, pattern in (
+                ("artifacts/identity_registry", "*.json"),
+                ("artifacts/virtual_registry", "*.zip"),
+            ):
+                directory = self.storage.path(relative)
+                if directory.exists():
+                    for name in directory.glob(pattern):
+                        path = self.storage.path(name.relative_to(self.storage.root))
+                        # Reserved snapshot directories can contain old references
+                        # or A→B links. Purge malformed snapshots as well.
+                        path.unlink()
         return {
             "deleted_identity_id": identity_id,
             "deletion_scope": "registry_and_managed_snapshots",
-            "retained": "original_videos, embedding_artifacts, temporaries, reports, external_snapshot_copies_and_backups",
+            "retained": "original_videos, embedding_artifacts, virtual_candidates_and_portrait_exports, temporaries, reports, external_snapshot_copies_and_backups",
         }

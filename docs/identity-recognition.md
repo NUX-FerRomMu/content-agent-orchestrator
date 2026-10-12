@@ -152,11 +152,13 @@ uv run --locked python -m content_agent_orchestrator --root /datos/influencer \
   identity delete <UUID>
 ```
 
-Elimina la identidad y sus referencias de SQLite con `secure_delete`, aumenta
-la revisión y purga **todos** los snapshots administrados, incluso corruptos,
+Elimina la identidad y sus referencias de SQLite con `secure_delete`, junto con
+su asociación y PNG virtual si existe. Aumenta la revisión y purga **todos** los
+snapshots administrados de identidades y rostros virtuales, incluso corruptos,
 porque pueden contener referencias antiguas. No garantiza borrado físico en
 SSD, journals del filesystem o backups. Conserva videos originales, artifacts
-de embeddings, temporales fallidos, informes y copias externas de snapshots;
+de embeddings, candidatos y exportaciones de retratos virtuales, temporales
+fallidos, informes y copias externas de snapshots;
 la CLI informa ese alcance. Si se requiere borrar todo material biométrico,
 eliminar también esas ejecuciones y sus backups según la política propia.
 La eliminación de una identidad no anonimizó los videos ni sus copias.

@@ -24,3 +24,18 @@ test identity for rejecting false matches; the US Navy does not endorse this pro
 
 Integration tests create their videos in temporary directories and never send
 the fixture or generated videos to external services.
+
+`virtual_adult.png` is a newly generated fictional adult portrait, created with
+the image generation tool for this project's virtual-identity tests. No source
+portrait or real person's name was provided to the generator. It is a test
+asset, not a virtual identity assigned to a user. Generation provenance cannot
+prove that the image resembles no real person.
+
+- Prompt: one fictional adult woman aged 35–40, medium warm brown skin, subtle
+  eyeliner, no eyewear, ordinary facial traits, frontal neutral studio portrait.
+- Generated on 2026-10-12; original file kept in the workspace generation directory.
+- Size: 2,082,644 bytes; dimensions: 1254×1254 RGB PNG.
+- SHA-256: `6c075392f5b27ba0f612f8e3de39400a89eb22a7727686e170490f05cf31a1c4`.
+- Its actual pixels are checked with YuNet/SFace for usability and separation
+  from the existing public-domain source fixtures. Tests of the cloud HTTP
+  adapter mock network responses; the local command adapter runs real subprocesses.
