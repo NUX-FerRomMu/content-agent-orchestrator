@@ -38,6 +38,7 @@ class ModelRedirect(urllib.request.HTTPRedirectHandler):
         "cdn-lfs.huggingface.co",
         "cdn-lfs-us-1.huggingface.co",
         "cas-bridge.xethub.hf.co",
+        "us.aws.cdn.hf.co",
     }
 
     def redirect_request(self, request, file, code, message, headers, new_url):
@@ -117,7 +118,9 @@ def selected_files(metadata: dict) -> list[dict]:
         chosen.update(
             name
             for name in entries
-            if name.startswith(component + "/") and name.endswith((".json", ".txt"))
+            if name.startswith(component + "/")
+            and name.endswith((".json", ".txt"))
+            and not name.endswith(".index.json")
         )
     for component in WEIGHT_COMPONENTS:
         stem = (

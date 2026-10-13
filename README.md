@@ -274,5 +274,7 @@ Los siguientes módulos serán reemplazo facial, validación visual, corrección
 verificada. El intercambio de voz podrá incorporarse después como otro módulo.
 El análisis usa CPU, con modelos incluidos, y no envía videos a servicios externos.
 La generación de B usa SDXL local o un generador externo local.
+Instalar el stack local con `uv sync --locked --group generation` y usar
+`uv run --locked --group generation` para los comandos que generan una imagen.
 Los inputs, temporales, registro y embeddings deben tratarse como material
 sensible; el directorio del usuario debe estar en almacenamiento privado.

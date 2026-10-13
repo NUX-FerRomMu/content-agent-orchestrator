@@ -5,6 +5,7 @@ import json
 import tempfile
 import unittest
 import urllib.error
+import urllib.request
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -141,6 +142,25 @@ class ModelPreparationTests(unittest.TestCase):
         verify_model(path)
         self.assertLess(clean.open.call_count, len(self.contents))
 
+    def test_single_fp16_snapshot_omits_indices_for_unselected_sharded_weights(self):
+        metadata, _ = fake_repository()
+        # RealVisXL publishes a float32 index alongside its single fp16 UNet.
+        metadata["siblings"].append(
+            {
+                "rfilename": "unet/diffusion_pytorch_model.safetensors.index.json",
+                "size": 100,
+                "blobId": "b" * 40,
+            }
+        )
+        files = selected_files(metadata)
+        self.assertFalse(any(item["path"].endswith(".index.json") for item in files))
+        self.assertTrue(
+            any(
+                item["path"] == "unet/diffusion_pytorch_model.safetensors"
+                for item in files
+            )
+        )
+
     def test_changed_weights_unverified_files_and_symlinks_are_rejected(self):
         model = self.root / "model"
         manifest = prepared_fixture(model)
@@ -218,3 +238,12 @@ class ModelPreparationTests(unittest.TestCase):
         ):
             with self.subTest(url=url), self.assertRaises(ExecutionError):
                 redirect.redirect_request(None, None, 302, "", None, url)
+        request = urllib.request.Request(
+            "https://huggingface.co/model/resolve/commit/weights"
+        )
+        redirected = redirect.redirect_request(
+            request, None, 302, "", {}, "https://us.aws.cdn.hf.co/xet-bridge/weights"
+        )
+        self.assertEqual(
+            redirected.full_url, "https://us.aws.cdn.hf.co/xet-bridge/weights"
+        )

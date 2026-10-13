@@ -12,3 +12,10 @@ dependencies = [
 dev = [
     "ruff>=0.16.8",
 ]
+generation = [
+    "torch>=2.6,<3",
+    "diffusers>=0.35,<0.38",
+    "transformers>=4.49,<5",
+    "accelerate>=1.2,<2",
+    "safetensors>=0.5,<1",
+]

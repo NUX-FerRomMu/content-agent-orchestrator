@@ -41,9 +41,17 @@ Los modelos puramente faciales como StyleGAN3 no se integran: no proporcionan
 el mismo control por prompt y su licencia limita el uso comercial.
 
 La generación necesita PyTorch, Diffusers, Transformers, Accelerate y
-Safetensors. Esas dependencias son opcionales; la inspección, el reconocimiento
-y la asignación de B ya aprobadas usan el entorno liviano. Su incorporación
-al grupo `generation` requiere autorización según AGENTS.md.
+Safetensors, fijados en `uv.lock` dentro del grupo opcional `generation`:
+
+```bash
+uv sync --locked --group generation
+```
+
+La inspección, el reconocimiento y la asignación de B ya aprobadas mantienen
+el entorno liviano (`uv sync --locked`, sin el grupo de generación). Para
+conservar el grupo al ejecutar comandos, usar `uv run --locked --group generation`
+o ejecutar `.venv/bin/python` después de instalarlo. El runtime importa estas
+bibliotecas solamente al generar una imagen nueva.
 
 La preparación es una descarga explícita:
 
@@ -80,7 +88,7 @@ indicados por el proveedor; no necesita una clave de API de imágenes.
 Con A registrado mediante `identity register`, ejecutar:
 
 ```bash
-uv run --locked python -m content_agent_orchestrator --root /datos/influencer \
+uv run --locked --group generation python -m content_agent_orchestrator --root /datos/influencer \
   virtual create <identity_id_A> --profile /ruta/perfil.json \
   --model-dir /ruta/devuelta/por/prepare-model
 ```
