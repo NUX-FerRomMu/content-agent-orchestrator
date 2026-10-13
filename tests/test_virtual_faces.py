@@ -341,9 +341,12 @@ class VirtualRegistryTests(unittest.TestCase):
     def test_identity_deletion_cascades_virtual_face_and_purges_catalogs(self):
         approved = self.approve()
         catalog = self.registry.snapshot()
+        interrupted = catalog.with_name(".interrupted.tmp")
+        interrupted.write_bytes(catalog.read_bytes())
         self.registry.identities.delete(self.identity_id)
         self.assertEqual(self.registry.list_faces()["faces"], [])
         self.assertFalse(catalog.exists())
+        self.assertFalse(interrupted.exists())
         self.assertEqual(self.registry.list_faces()["revision"], 2)
         self.assertTrue(Path(approved["portrait_path"]).exists())
 

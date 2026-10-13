@@ -4,9 +4,11 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from pathlib import Path
 from typing import ClassVar
 
@@ -245,8 +247,13 @@ def prepare_model(
     work = storage.path(f"temps/model_preparation/{model}-{commit}")
     with storage.run_lock(f"model-{model}-{commit}"):
         if destination.exists():
-            verify_model(destination)
-            return destination
+            try:
+                verify_model(destination)
+            except (ExecutionError, OSError):
+                # Keep the damaged snapshot until its replacement is verified.
+                pass
+            else:
+                return destination
         work.mkdir(parents=True, exist_ok=True, mode=0o700)
         for record in files:
             path = storage.path(work.relative_to(storage.root) / record["path"])
@@ -271,7 +278,20 @@ def prepare_model(
             stream.flush()
             os.fsync(stream.fileno())
         destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        work.replace(destination)
+        verify_model(work)
+        if destination.exists():
+            backup = storage.path(
+                f"temps/model_preparation/{model}-{commit}-corrupt-{uuid.uuid4().hex}"
+            )
+            destination.replace(backup)
+            try:
+                work.replace(destination)
+            except BaseException:
+                backup.replace(destination)
+                raise
+            shutil.rmtree(backup)
+        else:
+            work.replace(destination)
     return destination
 
 

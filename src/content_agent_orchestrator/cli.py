@@ -84,7 +84,7 @@ def main(argv: list[str] | None = None) -> int:
     recognize.add_argument(
         "--snapshot",
         type=Path,
-        help="Explicit frozen registry snapshot, required to resume after registry changes",
+        help="Explicit frozen registry snapshot; the original is required with --resume",
     )
     recognize.add_argument("--min-similarity", type=float, default=0.6)
     recognize.add_argument("--ambiguity-margin", type=float, default=0.12)
@@ -95,8 +95,14 @@ def main(argv: list[str] | None = None) -> int:
     virtualize.add_argument("video", type=Path)
     virtualize.add_argument("--detector", type=Path, default=bundled_yunet())
     virtualize.add_argument("--recognizer", type=Path, default=bundled_sface())
-    virtualize.add_argument("--snapshot", type=Path)
-    virtualize.add_argument("--catalog", type=Path)
+    virtualize.add_argument(
+        "--snapshot",
+        type=Path,
+        help="Original registry snapshot required with --resume",
+    )
+    virtualize.add_argument(
+        "--catalog", type=Path, help="Original virtual catalog required with --resume"
+    )
     virtualize.add_argument("--min-similarity", type=float, default=0.6)
     virtualize.add_argument("--ambiguity-margin", type=float, default=0.12)
     virtual = commands.add_parser(
@@ -252,6 +258,14 @@ def main(argv: list[str] | None = None) -> int:
             )
             inputs = {"video": args.video, "detector": args.model}
         elif args.command in ("recognize-faces", "assign-virtual-faces"):
+            if args.resume and args.snapshot is None:
+                raise PipelineError("Resuming requires the original --snapshot")
+            if (
+                args.resume
+                and args.command == "assign-virtual-faces"
+                and args.catalog is None
+            ):
+                raise PipelineError("Resuming requires the original --catalog")
             snapshot = args.snapshot or IdentityRegistry(storage).snapshot()
             validate_snapshot(read_json(snapshot))
             definition = (

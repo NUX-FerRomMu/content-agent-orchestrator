@@ -75,6 +75,10 @@ repositorio. Un manifiesto registra también SHA-256 locales, tamaños y commit.
 Los archivos completos se reutilizan tras un fallo; descargas parciales se
 conservan como diagnóstico y se reinician. Un modelo incompleto no se publica.
 La descarga se limita a 24 GiB y el directorio completo se publica con rename.
+Si la copia publicada no supera la verificación, repetir `virtual prepare-model`
+descarga un reemplazo en temporales y lo verifica antes de sustituirla. Una
+descarga fallida conserva la copia anterior y los archivos completos para
+reintentar; un fallo al publicar restaura la copia anterior.
 
 El resultado devuelve `model_dir` bajo
 `artifacts/models/<modelo>/<commit>/`. Los pesos grandes quedan en el directorio
@@ -233,9 +237,10 @@ usa inputs `video`, `detector`, `recognizer`, `registry` y `catalog` en el coman
 genérico `run`.
 
 Crear/aprobar B invalida los módulos virtuales, conservando caché de
-reconocimiento. Para reanudar una ejecución tras cambios, indicar tanto
+reconocimiento. Para reanudar cualquier ejecución, indicar tanto
 `--snapshot /ruta/registro-original.json` como `--catalog /ruta/catalogo-original.zip`,
 con la misma configuración. Las dos rutas aparecen en la respuesta de la CLI.
+Si falta alguna, la CLI rechaza la reanudación antes de crear nuevos snapshots.
 La ejecución resolverá contra ese estado histórico.
 
 Los vínculos A→B son privados: candidatos, retratos y catálogos se crean con

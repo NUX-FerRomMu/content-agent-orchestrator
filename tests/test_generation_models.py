@@ -142,6 +142,75 @@ class ModelPreparationTests(unittest.TestCase):
         verify_model(path)
         self.assertLess(clean.open.call_count, len(self.contents))
 
+    def test_preparation_repairs_invalid_published_snapshots(self):
+        for corruption in ("weight", "missing_manifest", "malformed_manifest", "extra"):
+            with self.subTest(corruption=corruption):
+                opener = self.opener()
+                path = self.prepare(opener)
+                manifest = path / "generation-model.json"
+                if corruption == "weight":
+                    (path / "unet/diffusion_pytorch_model.safetensors").write_bytes(
+                        b"damaged"
+                    )
+                elif corruption == "missing_manifest":
+                    manifest.unlink()
+                elif corruption == "malformed_manifest":
+                    manifest.write_text("{malformed")
+                else:
+                    (path / "unverified.py").write_text("never execute")
+                with self.assertRaises(ExecutionError):
+                    verify_model(path)
+                download_count = opener.open.call_count
+                self.assertEqual(self.prepare(opener), path)
+                verify_model(path)
+                self.assertGreater(opener.open.call_count, download_count)
+                self.assertEqual(
+                    list((self.storage.root / "temps/model_preparation").iterdir()), []
+                )
+
+    def test_failed_repair_keeps_published_copy_and_reuses_completed_downloads(self):
+        path = self.prepare(self.opener())
+        weight = path / "unet/diffusion_pytorch_model.safetensors"
+        weight.write_bytes(b"damaged")
+        with self.assertRaisesRegex(ExecutionError, "checksum"):
+            self.prepare(self.opener(corrupt=True))
+        self.assertEqual(weight.read_bytes(), b"damaged")
+        with self.assertRaisesRegex(ExecutionError, "checksum"):
+            verify_model(path)
+        clean = self.opener()
+        self.assertEqual(self.prepare(clean), path)
+        verify_model(path)
+        self.assertLess(clean.open.call_count, len(self.contents))
+
+    def test_failed_repair_publication_restores_previous_copy(self):
+        path = self.prepare(self.opener())
+        weight = path / "unet/diffusion_pytorch_model.safetensors"
+        weight.write_bytes(b"damaged")
+        work = self.storage.path(
+            f"temps/model_preparation/realvis-xl-{self.metadata['sha']}"
+        )
+        original_replace = Path.replace
+
+        def fail_publication(source, target):
+            if source == work and target == path:
+                raise OSError("simulated publication failure")
+            return original_replace(source, target)
+
+        with (
+            patch.object(Path, "replace", autospec=True, side_effect=fail_publication),
+            self.assertRaisesRegex(OSError, "publication failure"),
+        ):
+            self.prepare(self.opener())
+        self.assertEqual(weight.read_bytes(), b"damaged")
+        verify_model(work)
+        retry = self.opener()
+        self.assertEqual(self.prepare(retry), path)
+        verify_model(path)
+        retry.open.assert_not_called()
+        self.assertEqual(
+            list((self.storage.root / "temps/model_preparation").iterdir()), []
+        )
+
     def test_single_fp16_snapshot_omits_indices_for_unselected_sharded_weights(self):
         metadata, _ = fake_repository()
         # RealVisXL publishes a float32 index alongside its single fp16 UNet.

@@ -248,6 +248,18 @@ class IdentityTests(unittest.TestCase):
         self.registry.delete(identity["identity_id"])
         self.assertFalse(snapshot.exists())
 
+    def test_delete_purges_interrupted_snapshot_temporaries(self):
+        identity = self.enroll()
+        snapshot = self.registry.snapshot()
+        interrupted = snapshot.with_name("interrupted.tmp")
+        interrupted.write_bytes(snapshot.read_bytes())
+        external = self.root / "external.tmp"
+        external.write_bytes(interrupted.read_bytes())
+        self.registry.delete(identity["identity_id"])
+        self.assertFalse(interrupted.exists())
+        self.assertFalse(snapshot.exists())
+        self.assertTrue(external.exists())
+
     def test_reference_limit_rolls_back_the_complete_addition(self):
         frames, summary = self.embeddings([features(0)] * 16)
         first = self.registry.enroll(frames, summary, "track-000001")

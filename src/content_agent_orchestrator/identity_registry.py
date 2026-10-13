@@ -281,7 +281,9 @@ class IdentityRegistry:
             # Old snapshots contain biometric references even after a DB deletion.
             for relative, pattern in (
                 ("artifacts/identity_registry", "*.json"),
+                ("artifacts/identity_registry", "*.tmp"),
                 ("artifacts/virtual_registry", "*.zip"),
+                ("artifacts/virtual_registry", "*.tmp"),
             ):
                 directory = self.storage.path(relative)
                 if directory.exists():

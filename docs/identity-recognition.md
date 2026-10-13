@@ -92,7 +92,7 @@ la caché de resolución e informe, mientras que puede reutilizar inspección,
 detección, tracking y extracción. Los módulos no consultan una DB mutable.
 La revisión y hash usados quedan en el informe.
 
-Para reanudar después de cambios del registro, usar la ruta `registry_snapshot`
+Para reanudar, usar siempre la ruta `registry_snapshot`
 devuelta en la ejecución original, junto con la misma configuración:
 
 ```bash
@@ -154,7 +154,8 @@ uv run --locked python -m content_agent_orchestrator --root /datos/influencer \
 
 Elimina la identidad y sus referencias de SQLite con `secure_delete`, junto con
 su asociación y PNG virtual si existe. Aumenta la revisión y purga **todos** los
-snapshots administrados de identidades y rostros virtuales, incluso corruptos,
+snapshots administrados de identidades y rostros virtuales, incluso corruptos
+y sus archivos `.tmp` abandonados por una interrupción,
 porque pueden contener referencias antiguas. No garantiza borrado físico en
 SSD, journals del filesystem o backups. Conserva videos originales, artifacts
 de embeddings, candidatos y exportaciones de retratos virtuales, temporales
