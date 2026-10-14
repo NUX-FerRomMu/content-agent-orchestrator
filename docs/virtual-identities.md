@@ -3,8 +3,9 @@
 Esta etapa crea un rostro ficticio B y lo asocia a un `identity_id` A ya
 registrado. Guarda los **píxeles exactos** de B: repetir un prompt o una semilla
 no garantiza reproducir un rostro, así que la asociación aprobada es inmutable.
-Los videos fuente permanecen intactos. Todavía no hay intercambio facial ni
-validación de anonimización del video.
+Los videos fuente permanecen intactos. Esta etapa prepara B; el comando
+`anonymize-video` realiza el reemplazo y la validación posterior del video,
+descritos en [video-anonymization.md](video-anonymization.md).
 
 ## Perfil explícito
 

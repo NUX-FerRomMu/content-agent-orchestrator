@@ -121,6 +121,10 @@ class Pipeline:
 
         if final not in nodes:
             raise PipelineError("Final node does not exist")
+        if getattr(registry[nodes[final].module], "can_be_final", True) is False:
+            raise PipelineError(
+                f"Module {nodes[final].module} cannot be final; its outputs require downstream validation"
+            )
         dependencies: dict[str, set[str]] = {}
         children: dict[str, set[str]] = {key: set() for key in nodes}
         external_kinds: dict[str, str] = {}

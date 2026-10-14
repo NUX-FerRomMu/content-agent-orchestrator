@@ -2,7 +2,7 @@
 
 El pipeline integrado es `video.inspect → face.detect → face.track → face.embed
 → identity.resolve → identity.report`. Tiene un único nodo final y conserva el
-video original. **Todavía no produce un video anonimizado.** No realiza altas
+video original. **El reconocimiento no produce un video anonimizado.** No realiza altas
 automáticas: un `track_id` describe continuidad geométrica, mientras que un
 `identity_id` UUID identifica una persona registrada explícitamente entre clips.
 

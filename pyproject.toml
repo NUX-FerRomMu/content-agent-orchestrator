@@ -19,3 +19,16 @@ generation = [
     "accelerate>=1.2,<2",
     "safetensors>=0.5,<1",
 ]
+swap = [
+    "av>=14,<19",
+    "onnx>=1.17,<2",
+    "onnxruntime>=1.20,<2",
+]
+swap-cuda = [
+    "av>=14,<19",
+    "onnx>=1.17,<2",
+    "onnxruntime-gpu>=1.20,<2",
+]
+
+[tool.uv]
+conflicts = [[{ group = "swap" }, { group = "swap-cuda" }]]
