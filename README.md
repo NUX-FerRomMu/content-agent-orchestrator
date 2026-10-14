@@ -2,9 +2,9 @@
 
 Coordinador de pipelines de módulos componibles. Cada pipeline es un DAG que
 converge en **un único nodo final**. Permite inspeccionar videos, detectar y
-seguir rostros dentro de cada clip y exportar informes. El reconocimiento de
-personas entre videos, las identidades virtuales y el intercambio facial serán
-etapas posteriores.
+seguir rostros dentro de cada clip, reconocer personas registradas entre videos
+y generar identidades virtuales persistentes. El intercambio facial y la
+validación de anonimización del video serán etapas posteriores.
 
 ## Requisitos y preparación
 
@@ -34,11 +34,16 @@ El contenido del usuario queda fuera del checkout:
 <root>/
 ├── artifacts/
 │   ├── raw_footages/                      # videos fuente
-│   └── runs/<run_id>/<node>/<attempt>/    # resultados intermedios
+│   ├── runs/<run_id>/<node>/<attempt>/    # resultados intermedios privados
+│   ├── identity_registry/<sha256>.json    # snapshots biométricos privados
+│   ├── virtual_candidates/<hash>/        # rostros B pendientes de revisión
+│   ├── virtual_faces/<virtual_id>/        # retratos B aprobados
+│   └── virtual_registry/<sha256>.zip     # catálogos con píxeles de B
 ├── temps/<run_id>/<node>/                 # trabajo recuperable
 ├── outputs/<run_id>/                     # archivos del único nodo final
 └── state/
     ├── executions.sqlite                 # ejecuciones y checkpoints
+    ├── identities.sqlite                 # personas y referencias persistentes
     └── locks/                            # exclusión de una misma ejecución
 ```
 
@@ -135,13 +140,55 @@ incluidas rotaciones de cámara de 90°, 180° y 270°. El archivo fuente perman
 Los outputs son un informe JSON y archivos JSONL con trayectorias por frame,
 resúmenes de tracks e intervalos sin detecciones o con asociaciones ambiguas.
 Los `track_id` tienen alcance dentro de un clip; todavía no identifican personas
-entre videos. **Este comando analiza rostros; no produce un video anonimizado.**
+entre videos por sí solos. **Este comando analiza rostros; no produce un video anonimizado.**
 
 Se puede ajustar `--score-threshold` (por defecto 0.85) y `--max-dimension`
 (por defecto 640). Para configurar tracking o checkpoints, usar
 [examples/analyze-faces.json](examples/analyze-faces.json). Los contratos,
 parámetros, outputs y recuperación se describen en
 [docs/face-analysis.md](docs/face-analysis.md).
+
+## Reconocer personas entre videos
+
+```bash
+uv run --locked python -m content_agent_orchestrator \
+  --root /ruta/al/directorio-del-usuario recognize-faces /ruta/clip.mp4
+```
+
+Agrega `face.embed → identity.resolve → identity.report` al análisis. SFace está
+incluido con licencia Apache 2.0 y checksum verificado. Cada observación recibe
+un estado conocido, desconocido, ambiguo o inutilizable; no se propaga una
+identidad automáticamente a todo un track. Los outputs contienen metadatos,
+sin vectores ni imágenes. Los embeddings son artifacts intermedios privados.
+
+El alta en SQLite se realiza mediante `identity register`, usando las rutas
+`private_intermediates` devueltas por la CLI y un track elegido explícitamente.
+`identity list`, `identity snapshot` e `identity delete` permiten administrar
+el registro. El reconocimiento usa snapshots inmutables: los cambios del
+registro invalidan la caché de resolución. Consultar el flujo completo,
+parámetros, eliminación y límites de privacidad en
+[docs/identity-recognition.md](docs/identity-recognition.md).
+
+## Crear y reutilizar un rostro virtual
+
+`virtual create <identity_id> --profile /ruta/perfil.json` crea un candidato B
+para una persona A registrada, usando SDXL local o un generador local
+externo. El perfil define género, tono de piel, edad adulta y preferencias como
+maquillaje o delineado. `virtual prepare-model` descarga y verifica
+un checkpoint fotorealista RealVisXL o SDXL base. Crear B usa esos pesos
+localmente, sin API de imágenes ni transmisión del rostro A.
+
+Después de revisar la imagen, `virtual approve <identity_id> <candidate_id>
+--reviewed` asocia B de forma inmutable. Se validan geometría y separación
+biométrica respecto de las personas registradas. Repetir la creación reutiliza
+el mismo PNG: mantener la identidad no depende de regenerar el mismo prompt.
+
+`assign-virtual-faces /ruta/clip.mp4` extiende el DAG con `virtual.resolve →
+virtual.report`, conservando un único final. Publica asignaciones por frame y
+las caras sintéticas seleccionadas, sin intercambiar todavía el video. Casos
+desconocidos o ambiguos permanecen sin target. Consultar comandos, revisión
+visual, caché, backend local y límites en
+[docs/virtual-identities.md](docs/virtual-identities.md).
 
 ## Caché, fallos y reanudación
 
@@ -223,10 +270,11 @@ se marcan como omitidas; una validación completa requiere tenerlos instalados.
 
 ## Alcance siguiente
 
-Los siguientes módulos serán resolución de identidades en una base persistente,
-creación/recuperación de identidad virtual,
-reemplazo facial, validación visual, corrección conservadora y exportación
+Los siguientes módulos serán reemplazo facial, validación visual, corrección conservadora y exportación
 verificada. El intercambio de voz podrá incorporarse después como otro módulo.
-El análisis actual usa CPU, con el modelo incluido, y no envía videos a servicios externos.
-Los inputs, temporales y futuros embeddings deben tratarse como material
+El análisis usa CPU, con modelos incluidos, y no envía videos a servicios externos.
+La generación de B usa SDXL local o un generador externo local.
+Instalar el stack local con `uv sync --locked --group generation` y usar
+`uv run --locked --group generation` para los comandos que generan una imagen.
+Los inputs, temporales, registro y embeddings deben tratarse como material
 sensible; el directorio del usuario debe estar en almacenamiento privado.

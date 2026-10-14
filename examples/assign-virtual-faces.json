@@ -1,0 +1,132 @@
+{
+  "nodes": [
+    {
+      "id": "inspect",
+      "module": "video.inspect",
+      "inputs": {
+        "video": {
+          "external": "video"
+        }
+      }
+    },
+    {
+      "id": "detect",
+      "module": "face.detect",
+      "inputs": {
+        "video": {
+          "external": "video"
+        },
+        "model": {
+          "external": "detector"
+        },
+        "inspection": {
+          "node": "inspect",
+          "output": "manifest"
+        },
+        "timestamps": {
+          "node": "inspect",
+          "output": "timestamps"
+        }
+      },
+      "parameters": {}
+    },
+    {
+      "id": "track",
+      "module": "face.track",
+      "inputs": {
+        "frames": {
+          "node": "detect",
+          "output": "frames"
+        },
+        "summary": {
+          "node": "detect",
+          "output": "summary"
+        }
+      },
+      "parameters": {}
+    },
+    {
+      "id": "embed",
+      "module": "face.embed",
+      "parameters": {},
+      "inputs": {
+        "video": {
+          "external": "video"
+        },
+        "model": {
+          "external": "recognizer"
+        },
+        "inspection": {
+          "node": "inspect",
+          "output": "manifest"
+        },
+        "timestamps": {
+          "node": "inspect",
+          "output": "timestamps"
+        },
+        "frames": {
+          "node": "track",
+          "output": "frames"
+        },
+        "summary": {
+          "node": "track",
+          "output": "summary"
+        }
+      }
+    },
+    {
+      "id": "resolve",
+      "module": "identity.resolve",
+      "parameters": {},
+      "inputs": {
+        "frames": {
+          "node": "embed",
+          "output": "frames"
+        },
+        "summary": {
+          "node": "embed",
+          "output": "summary"
+        },
+        "registry": {
+          "external": "registry"
+        }
+      }
+    },
+    {
+      "id": "virtual",
+      "module": "virtual.resolve",
+      "inputs": {
+        "frames": {
+          "node": "resolve",
+          "output": "frames"
+        },
+        "summary": {
+          "node": "resolve",
+          "output": "summary"
+        },
+        "catalog": {
+          "external": "catalog"
+        }
+      }
+    },
+    {
+      "id": "report",
+      "module": "virtual.report",
+      "inputs": {
+        "frames": {
+          "node": "virtual",
+          "output": "frames"
+        },
+        "targets": {
+          "node": "virtual",
+          "output": "targets"
+        },
+        "summary": {
+          "node": "virtual",
+          "output": "summary"
+        }
+      }
+    }
+  ],
+  "final": "report"
+}

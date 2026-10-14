@@ -364,6 +364,7 @@ class Runner:
                 raise ExecutionError("Module output names must be ASCII identifiers")
             extension = source.path.suffix
             target = staging / f"{name}{extension}"
+            target.touch(mode=0o600)
             shutil.copyfile(source.path, target)
             with target.open("rb") as stream:
                 os.fsync(stream.fileno())

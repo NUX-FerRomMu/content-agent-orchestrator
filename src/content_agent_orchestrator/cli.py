@@ -3,15 +3,22 @@
 import argparse
 import json
 import os
+import sqlite3
 import sys
 from pathlib import Path
 
 from .contracts import ExecutionError, PipelineError
-from .face_data import bundled_yunet
+from .face_data import bundled_yunet, read_json
+from .generation_models import MODEL_REPOSITORIES, prepare_model
+from .identity_data import bundled_sface, validate_snapshot
+from .identity_registry import IdentityRegistry
 from .modules import builtin_registry
 from .pipeline import Pipeline
+from .portrait_generators import CommandPortraitGenerator
 from .runner import Runner
+from .sdxl_generator import SDXLPortraitGenerator
 from .storage import UserStorage
+from .virtual_registry import VirtualRegistry
 
 
 def inspection_definition() -> dict:
@@ -67,10 +74,98 @@ def main(argv: list[str] | None = None) -> int:
         help="Maximum detection image dimension, a multiple of 32",
     )
     analyze.add_argument("--score-threshold", type=float, default=0.85)
+    recognize = commands.add_parser(
+        "recognize-faces",
+        help="Extract private embeddings and resolve identities; does not anonymize",
+    )
+    recognize.add_argument("video", type=Path)
+    recognize.add_argument("--detector", type=Path, default=bundled_yunet())
+    recognize.add_argument("--recognizer", type=Path, default=bundled_sface())
+    recognize.add_argument(
+        "--snapshot",
+        type=Path,
+        help="Explicit frozen registry snapshot; the original is required with --resume",
+    )
+    recognize.add_argument("--min-similarity", type=float, default=0.6)
+    recognize.add_argument("--ambiguity-margin", type=float, default=0.12)
+    virtualize = commands.add_parser(
+        "assign-virtual-faces",
+        help="Map known faces to approved synthetic targets; does not swap video",
+    )
+    virtualize.add_argument("video", type=Path)
+    virtualize.add_argument("--detector", type=Path, default=bundled_yunet())
+    virtualize.add_argument("--recognizer", type=Path, default=bundled_sface())
+    virtualize.add_argument(
+        "--snapshot",
+        type=Path,
+        help="Original registry snapshot required with --resume",
+    )
+    virtualize.add_argument(
+        "--catalog", type=Path, help="Original virtual catalog required with --resume"
+    )
+    virtualize.add_argument("--min-similarity", type=float, default=0.6)
+    virtualize.add_argument("--ambiguity-margin", type=float, default=0.12)
+    virtual = commands.add_parser(
+        "virtual", help="Generate, visually approve and reuse immutable synthetic faces"
+    )
+    virtual_actions = virtual.add_subparsers(dest="virtual_action", required=True)
+    create = virtual_actions.add_parser("create")
+    create.add_argument("identity_id")
+    create.add_argument("--profile", type=Path, required=True)
+    create.add_argument("--backend", choices=("sdxl", "command"), default="sdxl")
+    create.add_argument(
+        "--model-dir", type=Path, help="Directory returned by virtual prepare-model"
+    )
+    create.add_argument("--seed", type=int, default=42)
+    create.add_argument("--steps", type=int, default=30)
+    create.add_argument("--device", choices=("cuda", "cpu"), default="cuda")
+    create.add_argument(
+        "--offload", action=argparse.BooleanOptionalAction, default=True
+    )
+    create.add_argument("--cache", choices=("reuse", "fresh"), default="reuse")
+    create.add_argument(
+        "--generator", type=Path, help="Local command configuration JSON"
+    )
+    approve = virtual_actions.add_parser("approve")
+    approve.add_argument("identity_id")
+    approve.add_argument("candidate_id")
+    approve.add_argument(
+        "--reviewed",
+        action="store_true",
+        help="I reviewed B: fictional generation, clearly adult, no eyewear/eccentric traits, gender/skin match A",
+    )
+    virtual_actions.add_parser("list")
+    virtual_actions.add_parser("snapshot")
+    prepare = virtual_actions.add_parser(
+        "prepare-model",
+        help="Explicit download and checksum verification of open SDXL weights",
+    )
+    prepare.add_argument(
+        "--model", choices=tuple(MODEL_REPOSITORIES), default="realvis-xl"
+    )
+    prepare.add_argument("--revision", default="main")
+    identity = commands.add_parser(
+        "identity", help="Explicit local identity enrollment and management"
+    )
+    actions = identity.add_subparsers(dest="identity_action", required=True)
+    register = actions.add_parser("register")
+    register.add_argument("--embeddings", type=Path, required=True)
+    register.add_argument("--summary", type=Path, required=True)
+    register.add_argument("--track", required=True)
+    target = register.add_mutually_exclusive_group()
+    target.add_argument("--alias")
+    target.add_argument(
+        "--identity-id", help="Add coherent references to an existing identity"
+    )
+    register.add_argument("--min-similarity", type=float, default=0.65)
+    actions.add_parser("list")
+    actions.add_parser("snapshot")
+    delete = actions.add_parser("delete")
+    delete.add_argument("identity_id")
     run = commands.add_parser("run", help="Run a JSON pipeline")
     run.add_argument("pipeline", type=Path)
     run.add_argument("--input", action="append", default=[], metavar="NAME=PATH")
-    for command in (inspect, analyze, run):
+    for command in (inspect, analyze, recognize, virtualize, run):
         command.add_argument("--cache", choices=("reuse", "fresh"), default="reuse")
         command.add_argument(
             "--resume",
@@ -81,6 +176,73 @@ def main(argv: list[str] | None = None) -> int:
     try:
         registry = builtin_registry()
         storage = UserStorage(args.root)
+        if args.command == "virtual" and args.virtual_action == "prepare-model":
+            path = prepare_model(storage, args.model, args.revision)
+            print(
+                json.dumps(
+                    {"model_dir": str(path), "generation_is_offline": True}, indent=2
+                )
+            )
+            return 0
+        if args.command == "virtual":
+            faces = VirtualRegistry(storage)
+            if args.virtual_action == "create":
+                if args.backend == "command":
+                    if args.generator is None:
+                        raise PipelineError(
+                            "Local generation requires --generator configuration"
+                        )
+                    generator = CommandPortraitGenerator(read_json(args.generator))
+                else:
+                    if args.generator is not None:
+                        raise PipelineError(
+                            "--generator is only for the command backend"
+                        )
+                    model_dir = args.model_dir or storage.path(
+                        "artifacts/models/unprepared"
+                    )
+                    generator = SDXLPortraitGenerator(
+                        model_dir,
+                        seed=args.seed,
+                        steps=args.steps,
+                        device=args.device,
+                        offload=args.offload,
+                    )
+                payload = faces.create(
+                    args.identity_id,
+                    read_json(args.profile),
+                    generator,
+                    cache=args.cache,
+                )
+            elif args.virtual_action == "approve":
+                payload = faces.approve(
+                    args.identity_id, args.candidate_id, reviewed=args.reviewed
+                )
+            elif args.virtual_action == "list":
+                payload = faces.list_faces()
+            else:
+                payload = {"path": str(faces.snapshot())}
+            print(json.dumps(payload, indent=2))
+            return 0
+        if args.command == "identity":
+            identities = IdentityRegistry(storage)
+            if args.identity_action == "register":
+                payload = identities.enroll(
+                    args.embeddings,
+                    args.summary,
+                    args.track,
+                    alias=args.alias,
+                    identity_id=args.identity_id,
+                    min_similarity=args.min_similarity,
+                )
+            elif args.identity_action == "list":
+                payload = identities.list_identities()
+            elif args.identity_action == "snapshot":
+                payload = {"path": str(identities.snapshot())}
+            else:
+                payload = identities.delete(args.identity_id)
+            print(json.dumps(payload, indent=2))
+            return 0
         if args.command == "inspect":
             pipeline = Pipeline.parse(inspection_definition(), registry)
             inputs = {"video": args.video}
@@ -95,6 +257,39 @@ def main(argv: list[str] | None = None) -> int:
                 registry,
             )
             inputs = {"video": args.video, "detector": args.model}
+        elif args.command in ("recognize-faces", "assign-virtual-faces"):
+            if args.resume and args.snapshot is None:
+                raise PipelineError("Resuming requires the original --snapshot")
+            if (
+                args.resume
+                and args.command == "assign-virtual-faces"
+                and args.catalog is None
+            ):
+                raise PipelineError("Resuming requires the original --catalog")
+            snapshot = args.snapshot or IdentityRegistry(storage).snapshot()
+            validate_snapshot(read_json(snapshot))
+            definition = (
+                virtual_assignment_definition
+                if args.command == "assign-virtual-faces"
+                else identity_recognition_definition
+            )
+            pipeline = Pipeline.parse(
+                definition(
+                    resolution_parameters={
+                        "min_similarity": args.min_similarity,
+                        "ambiguity_margin": args.ambiguity_margin,
+                    }
+                ),
+                registry,
+            )
+            inputs = {
+                "video": args.video,
+                "detector": args.detector,
+                "recognizer": args.recognizer,
+                "registry": snapshot,
+            }
+            if args.command == "assign-virtual-faces":
+                inputs["catalog"] = args.catalog or VirtualRegistry(storage).snapshot()
         else:
             pipeline = Pipeline.load(args.pipeline, registry)
             inputs = {}
@@ -108,9 +303,34 @@ def main(argv: list[str] | None = None) -> int:
             registry,
             emit=lambda event: print(json.dumps(event), file=sys.stderr),
         ).run(pipeline, inputs, cache=args.cache, resume=args.resume)
+        extra = {}
+        if args.command in ("recognize-faces", "assign-virtual-faces"):
+            with storage.connect() as connection:
+                encoded = connection.execute(
+                    "SELECT outputs FROM nodes WHERE run_id = ? AND node_id = 'embed' AND status = 'succeeded'",
+                    (result.run_id,),
+                ).fetchone()
+            artifacts = (
+                storage.verified_artifacts(
+                    encoded[0], dict(registry["face.embed"].output_kinds)
+                )
+                if encoded
+                else None
+            )
+            if artifacts is None:
+                raise ExecutionError("Cannot verify completed embedding artifacts")
+            extra = {
+                "registry_snapshot": str(Path(inputs["registry"]).resolve()),
+                "private_intermediates": {
+                    name: str(item.path) for name, item in artifacts.items()
+                },
+            }
+            if args.command == "assign-virtual-faces":
+                extra["virtual_catalog"] = str(Path(inputs["catalog"]).resolve())
         print(
             json.dumps(
                 {
+                    **extra,
                     "run_id": result.run_id,
                     "status": "succeeded",
                     "cache_hits": list(result.cache_hits),
@@ -128,7 +348,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
         return 0
-    except (PipelineError, ExecutionError, OSError, ValueError) as exc:
+    except (PipelineError, ExecutionError, OSError, ValueError, sqlite3.Error) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:
@@ -177,3 +397,86 @@ def face_analysis_definition(
         ],
         "final": "report",
     }
+
+
+def identity_recognition_definition(
+    detection_parameters=None,
+    tracking_parameters=None,
+    embedding_parameters=None,
+    resolution_parameters=None,
+) -> dict:
+    definition = face_analysis_definition(detection_parameters, tracking_parameters)
+    definition["nodes"].pop()
+    definition["nodes"].extend(
+        [
+            {
+                "id": "embed",
+                "module": "face.embed",
+                "parameters": embedding_parameters or {},
+                "inputs": {
+                    "video": {"external": "video"},
+                    "model": {"external": "recognizer"},
+                    "inspection": {"node": "inspect", "output": "manifest"},
+                    "timestamps": {"node": "inspect", "output": "timestamps"},
+                    "frames": {"node": "track", "output": "frames"},
+                    "summary": {"node": "track", "output": "summary"},
+                },
+            },
+            {
+                "id": "resolve",
+                "module": "identity.resolve",
+                "parameters": resolution_parameters or {},
+                "inputs": {
+                    "frames": {"node": "embed", "output": "frames"},
+                    "summary": {"node": "embed", "output": "summary"},
+                    "registry": {"external": "registry"},
+                },
+            },
+            {
+                "id": "report",
+                "module": "identity.report",
+                "inputs": {
+                    name: {"node": "resolve", "output": name}
+                    for name in ("summary", "frames", "tracks")
+                },
+            },
+        ]
+    )
+    return definition
+
+
+def virtual_assignment_definition(
+    detection_parameters=None,
+    tracking_parameters=None,
+    embedding_parameters=None,
+    resolution_parameters=None,
+) -> dict:
+    definition = identity_recognition_definition(
+        detection_parameters,
+        tracking_parameters,
+        embedding_parameters,
+        resolution_parameters,
+    )
+    definition["nodes"].pop()
+    definition["nodes"].extend(
+        [
+            {
+                "id": "virtual",
+                "module": "virtual.resolve",
+                "inputs": {
+                    "frames": {"node": "resolve", "output": "frames"},
+                    "summary": {"node": "resolve", "output": "summary"},
+                    "catalog": {"external": "catalog"},
+                },
+            },
+            {
+                "id": "report",
+                "module": "virtual.report",
+                "inputs": {
+                    name: {"node": "virtual", "output": name}
+                    for name in ("frames", "targets", "summary")
+                },
+            },
+        ]
+    )
+    return definition
