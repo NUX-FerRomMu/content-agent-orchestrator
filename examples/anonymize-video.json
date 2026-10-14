@@ -1,0 +1,288 @@
+{
+  "nodes": [
+    {
+      "id": "inspect",
+      "module": "video.inspect",
+      "inputs": {
+        "video": {
+          "external": "video"
+        }
+      },
+      "parameters": {
+        "timeout_seconds": 600
+      }
+    },
+    {
+      "id": "detect",
+      "module": "face.detect",
+      "inputs": {
+        "video": {
+          "external": "video"
+        },
+        "model": {
+          "external": "detector"
+        },
+        "inspection": {
+          "node": "inspect",
+          "output": "manifest"
+        },
+        "timestamps": {
+          "node": "inspect",
+          "output": "timestamps"
+        }
+      },
+      "parameters": {
+        "timeout_seconds": 600
+      }
+    },
+    {
+      "id": "track",
+      "module": "face.track",
+      "inputs": {
+        "frames": {
+          "node": "detect",
+          "output": "frames"
+        },
+        "summary": {
+          "node": "detect",
+          "output": "summary"
+        }
+      },
+      "parameters": {}
+    },
+    {
+      "id": "embed",
+      "module": "face.embed",
+      "parameters": {
+        "timeout_seconds": 600
+      },
+      "inputs": {
+        "video": {
+          "external": "video"
+        },
+        "model": {
+          "external": "recognizer"
+        },
+        "inspection": {
+          "node": "inspect",
+          "output": "manifest"
+        },
+        "timestamps": {
+          "node": "inspect",
+          "output": "timestamps"
+        },
+        "frames": {
+          "node": "track",
+          "output": "frames"
+        },
+        "summary": {
+          "node": "track",
+          "output": "summary"
+        }
+      }
+    },
+    {
+      "id": "resolve",
+      "module": "identity.resolve",
+      "parameters": {},
+      "inputs": {
+        "frames": {
+          "node": "embed",
+          "output": "frames"
+        },
+        "summary": {
+          "node": "embed",
+          "output": "summary"
+        },
+        "registry": {
+          "external": "registry"
+        }
+      }
+    },
+    {
+      "id": "virtual",
+      "module": "virtual.resolve",
+      "inputs": {
+        "frames": {
+          "node": "resolve",
+          "output": "frames"
+        },
+        "summary": {
+          "node": "resolve",
+          "output": "summary"
+        },
+        "catalog": {
+          "external": "catalog"
+        }
+      }
+    },
+    {
+      "id": "swap",
+      "module": "face.swap",
+      "parameters": {},
+      "inputs": {
+        "timestamps": {
+          "node": "inspect",
+          "output": "timestamps"
+        },
+        "video": {
+          "external": "video"
+        },
+        "inspection": {
+          "node": "inspect",
+          "output": "manifest"
+        },
+        "assignments": {
+          "node": "virtual",
+          "output": "frames"
+        },
+        "summary": {
+          "node": "virtual",
+          "output": "summary"
+        },
+        "targets": {
+          "node": "virtual",
+          "output": "targets"
+        },
+        "swap_model": {
+          "external": "swap_model"
+        },
+        "arcface_model": {
+          "external": "arcface_model"
+        }
+      }
+    },
+    {
+      "id": "validate",
+      "module": "face.validate",
+      "inputs": {
+        "timestamps": {
+          "node": "inspect",
+          "output": "timestamps"
+        },
+        "assignments": {
+          "node": "virtual",
+          "output": "frames"
+        },
+        "embeddings": {
+          "node": "embed",
+          "output": "frames"
+        },
+        "targets": {
+          "node": "virtual",
+          "output": "targets"
+        },
+        "registry": {
+          "external": "registry"
+        },
+        "detector": {
+          "external": "detector"
+        },
+        "recognizer": {
+          "external": "recognizer"
+        },
+        "frames": {
+          "node": "swap",
+          "output": "frames"
+        },
+        "records": {
+          "node": "swap",
+          "output": "records"
+        },
+        "summary": {
+          "node": "swap",
+          "output": "summary"
+        }
+      }
+    },
+    {
+      "id": "redact",
+      "module": "face.redact",
+      "parameters": {
+        "chunk_frames": 32
+      },
+      "inputs": {
+        "timestamps": {
+          "node": "inspect",
+          "output": "timestamps"
+        },
+        "frames": {
+          "node": "swap",
+          "output": "frames"
+        },
+        "records": {
+          "node": "swap",
+          "output": "records"
+        },
+        "summary": {
+          "node": "swap",
+          "output": "summary"
+        },
+        "audit": {
+          "node": "validate",
+          "output": "audit"
+        },
+        "validation": {
+          "node": "validate",
+          "output": "summary"
+        }
+      }
+    },
+    {
+      "id": "export",
+      "module": "video.export",
+      "parameters": {},
+      "inputs": {
+        "timestamps": {
+          "node": "inspect",
+          "output": "timestamps"
+        },
+        "assignments": {
+          "node": "virtual",
+          "output": "frames"
+        },
+        "embeddings": {
+          "node": "embed",
+          "output": "frames"
+        },
+        "targets": {
+          "node": "virtual",
+          "output": "targets"
+        },
+        "registry": {
+          "external": "registry"
+        },
+        "detector": {
+          "external": "detector"
+        },
+        "recognizer": {
+          "external": "recognizer"
+        },
+        "video": {
+          "external": "video"
+        },
+        "inspection": {
+          "node": "inspect",
+          "output": "manifest"
+        },
+        "swap_records": {
+          "node": "swap",
+          "output": "records"
+        },
+        "frames": {
+          "node": "redact",
+          "output": "frames"
+        },
+        "records": {
+          "node": "redact",
+          "output": "records"
+        },
+        "summary": {
+          "node": "redact",
+          "output": "summary"
+        }
+      }
+    }
+  ],
+  "final": "export"
+}

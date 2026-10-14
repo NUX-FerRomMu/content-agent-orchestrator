@@ -41,6 +41,15 @@ class PipelineTests(unittest.TestCase):
         with self.assertRaisesRegex(PipelineError, "single declared final"):
             Pipeline.parse(self.definition, self.registry)
 
+    def test_unvalidated_swap_cannot_be_declared_as_the_final_node(self):
+        from content_agent_orchestrator.cli import video_anonymization_definition
+
+        definition = video_anonymization_definition()
+        definition["nodes"] = definition["nodes"][:7]
+        definition["final"] = "swap"
+        with self.assertRaisesRegex(PipelineError, "face.swap cannot be final"):
+            Pipeline.parse(definition, self.registry)
+
     def test_rejects_unknown_dependency(self):
         self.definition["nodes"][0] = report_node("absent")
         with self.assertRaisesRegex(PipelineError, "Unknown dependency"):

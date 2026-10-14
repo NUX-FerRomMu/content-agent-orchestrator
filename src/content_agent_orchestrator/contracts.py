@@ -35,6 +35,8 @@ class ModuleContext:
 
 
 class Module(Protocol):
+    """Modules may set can_be_final=False to require downstream validation."""
+
     name: str
     version: str
     input_kinds: Mapping[str, str]

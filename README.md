@@ -3,8 +3,9 @@
 Coordinador de pipelines de módulos componibles. Cada pipeline es un DAG que
 converge en **un único nodo final**. Permite inspeccionar videos, detectar y
 seguir rostros dentro de cada clip, reconocer personas registradas entre videos
-y generar identidades virtuales persistentes. El intercambio facial y la
-validación de anonimización del video serán etapas posteriores.
+y generar identidades virtuales persistentes. Puede reemplazar rostros con un
+motor local, ocultar frames que no superan la validación de privacidad y
+publicar el video solamente después de comprobar también los píxeles codificados.
 
 ## Requisitos y preparación
 
@@ -268,10 +269,33 @@ Las de integración generan videos pequeños con audio y timing constante o
 variable, y comprueban que el input no cambie. Sin FFmpeg/FFprobe esas pruebas
 se marcan como omitidas; una validación completa requiere tenerlos instalados.
 
+## Video con rostro virtual
+
+Después de registrar A y aprobar B, instalar el runtime opcional de swap:
+
+```bash
+uv sync --locked --group swap
+export PYTHONPATH=src
+uv run --locked --group swap python -m content_agent_orchestrator --root /datos/influencer \
+  anonymize-video /ruta/clip.mp4 \
+  --swap-model /ruta/inswapper_128.onnx \
+  --arcface-model /ruta/arcface_w600k_r50.onnx
+```
+
+La salida incluye video MKV, informe de privacidad y auditoría por frame.
+`face.swap → face.validate → face.redact → video.export` converge en un único
+final. Los frames sin validación quedan negros; el resto requiere separación
+de A y coincidencia con B. Se conservan todos los frames y tiempos, también con
+FPS variables. El audio se copia y se verifica sin modificar la voz.
+
+Ver [docs/video-anonymization.md](docs/video-anonymization.md) para pesos,
+CPU/CUDA, H.264 o FFV1 sin pérdida, reanudación, almacenamiento y límites.
+El DAG declarativo está en [examples/anonymize-video.json](examples/anonymize-video.json).
+
 ## Alcance siguiente
 
-Los siguientes módulos serán reemplazo facial, validación visual, corrección conservadora y exportación
-verificada. El intercambio de voz podrá incorporarse después como otro módulo.
+El intercambio de voz y el refinamiento visual podrán incorporarse después
+como otros módulos. Todo refinamiento de píxeles necesita validación posterior.
 El análisis usa CPU, con modelos incluidos, y no envía videos a servicios externos.
 La generación de B usa SDXL local o un generador externo local.
 Instalar el stack local con `uv sync --locked --group generation` y usar

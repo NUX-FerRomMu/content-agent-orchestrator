@@ -105,6 +105,31 @@ def main(argv: list[str] | None = None) -> int:
     )
     virtualize.add_argument("--min-similarity", type=float, default=0.6)
     virtualize.add_argument("--ambiguity-margin", type=float, default=0.12)
+    anonymize = commands.add_parser(
+        "anonymize-video",
+        help="Replace approved faces and publish only validated/redacted video",
+    )
+    anonymize.add_argument("video", type=Path)
+    anonymize.add_argument("--detector", type=Path, default=bundled_yunet())
+    anonymize.add_argument("--recognizer", type=Path, default=bundled_sface())
+    anonymize.add_argument(
+        "--snapshot",
+        type=Path,
+        help="Original registry snapshot required with --resume",
+    )
+    anonymize.add_argument(
+        "--catalog", type=Path, help="Original virtual catalog required with --resume"
+    )
+    anonymize.add_argument("--swap-model", type=Path, required=True)
+    anonymize.add_argument("--arcface-model", type=Path, required=True)
+    anonymize.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
+    anonymize.add_argument("--chunk-frames", type=int, default=32)
+    anonymize.add_argument("--timeout-seconds", type=int, default=600)
+    anonymize.add_argument("--codec", choices=("h264", "ffv1"), default="h264")
+    anonymize.add_argument("--crf", type=int, default=18)
+    anonymize.add_argument("--allow-all-redacted", action="store_true")
+    anonymize.add_argument("--min-similarity", type=float, default=0.6)
+    anonymize.add_argument("--ambiguity-margin", type=float, default=0.12)
     virtual = commands.add_parser(
         "virtual", help="Generate, visually approve and reuse immutable synthetic faces"
     )
@@ -165,7 +190,7 @@ def main(argv: list[str] | None = None) -> int:
     run = commands.add_parser("run", help="Run a JSON pipeline")
     run.add_argument("pipeline", type=Path)
     run.add_argument("--input", action="append", default=[], metavar="NAME=PATH")
-    for command in (inspect, analyze, recognize, virtualize, run):
+    for command in (inspect, analyze, recognize, virtualize, anonymize, run):
         command.add_argument("--cache", choices=("reuse", "fresh"), default="reuse")
         command.add_argument(
             "--resume",
@@ -257,12 +282,16 @@ def main(argv: list[str] | None = None) -> int:
                 registry,
             )
             inputs = {"video": args.video, "detector": args.model}
-        elif args.command in ("recognize-faces", "assign-virtual-faces"):
+        elif args.command in (
+            "recognize-faces",
+            "assign-virtual-faces",
+            "anonymize-video",
+        ):
             if args.resume and args.snapshot is None:
                 raise PipelineError("Resuming requires the original --snapshot")
             if (
                 args.resume
-                and args.command == "assign-virtual-faces"
+                and args.command in ("assign-virtual-faces", "anonymize-video")
                 and args.catalog is None
             ):
                 raise PipelineError("Resuming requires the original --catalog")
@@ -273,12 +302,29 @@ def main(argv: list[str] | None = None) -> int:
                 if args.command == "assign-virtual-faces"
                 else identity_recognition_definition
             )
+            extra_parameters = {}
+            if args.command == "anonymize-video":
+                definition = video_anonymization_definition
+                extra_parameters = {
+                    "swap_parameters": {
+                        "device": args.device,
+                        "chunk_frames": args.chunk_frames,
+                        "timeout_seconds": args.timeout_seconds,
+                    },
+                    "export_parameters": {
+                        "codec": args.codec,
+                        "crf": args.crf,
+                        "timeout_seconds": args.timeout_seconds,
+                        "allow_all_redacted": args.allow_all_redacted,
+                    },
+                }
             pipeline = Pipeline.parse(
                 definition(
+                    **extra_parameters,
                     resolution_parameters={
                         "min_similarity": args.min_similarity,
                         "ambiguity_margin": args.ambiguity_margin,
-                    }
+                    },
                 ),
                 registry,
             )
@@ -288,8 +334,11 @@ def main(argv: list[str] | None = None) -> int:
                 "recognizer": args.recognizer,
                 "registry": snapshot,
             }
-            if args.command == "assign-virtual-faces":
+            if args.command in ("assign-virtual-faces", "anonymize-video"):
                 inputs["catalog"] = args.catalog or VirtualRegistry(storage).snapshot()
+            if args.command == "anonymize-video":
+                inputs["swap_model"] = args.swap_model
+                inputs["arcface_model"] = args.arcface_model
         else:
             pipeline = Pipeline.load(args.pipeline, registry)
             inputs = {}
@@ -304,7 +353,11 @@ def main(argv: list[str] | None = None) -> int:
             emit=lambda event: print(json.dumps(event), file=sys.stderr),
         ).run(pipeline, inputs, cache=args.cache, resume=args.resume)
         extra = {}
-        if args.command in ("recognize-faces", "assign-virtual-faces"):
+        if args.command in (
+            "recognize-faces",
+            "assign-virtual-faces",
+            "anonymize-video",
+        ):
             with storage.connect() as connection:
                 encoded = connection.execute(
                     "SELECT outputs FROM nodes WHERE run_id = ? AND node_id = 'embed' AND status = 'succeeded'",
@@ -325,7 +378,7 @@ def main(argv: list[str] | None = None) -> int:
                     name: str(item.path) for name, item in artifacts.items()
                 },
             }
-            if args.command == "assign-virtual-faces":
+            if args.command in ("assign-virtual-faces", "anonymize-video"):
                 extra["virtual_catalog"] = str(Path(inputs["catalog"]).resolve())
         print(
             json.dumps(
@@ -479,4 +532,88 @@ def virtual_assignment_definition(
             },
         ]
     )
+    return definition
+
+
+def video_anonymization_definition(
+    *, swap_parameters=None, export_parameters=None, resolution_parameters=None
+) -> dict:
+    swap_parameters = swap_parameters or {}
+    timeout = swap_parameters.get("timeout_seconds", 600)
+    definition = virtual_assignment_definition(
+        detection_parameters={"timeout_seconds": timeout},
+        embedding_parameters={"timeout_seconds": timeout},
+        resolution_parameters=resolution_parameters,
+    )
+    definition["nodes"].pop()
+    definition["nodes"][0]["parameters"] = {"timeout_seconds": timeout}
+
+    def node(name, output):
+        return {"node": name, "output": output}
+
+    def external(name):
+        return {"external": name}
+
+    shared = {"timestamps": node("inspect", "timestamps")}
+    references = {
+        "assignments": node("virtual", "frames"),
+        "embeddings": node("embed", "frames"),
+        "targets": node("virtual", "targets"),
+        "registry": external("registry"),
+        "detector": external("detector"),
+        "recognizer": external("recognizer"),
+    }
+    swapped = {key: node("swap", key) for key in ("frames", "records", "summary")}
+    definition["nodes"].extend(
+        [
+            {
+                "id": "swap",
+                "module": "face.swap",
+                "parameters": swap_parameters,
+                "inputs": shared
+                | {
+                    "video": external("video"),
+                    "inspection": node("inspect", "manifest"),
+                    "assignments": node("virtual", "frames"),
+                    "summary": node("virtual", "summary"),
+                    "targets": node("virtual", "targets"),
+                    "swap_model": external("swap_model"),
+                    "arcface_model": external("arcface_model"),
+                },
+            },
+            {
+                "id": "validate",
+                "module": "face.validate",
+                "inputs": shared | references | swapped,
+            },
+            {
+                "id": "redact",
+                "module": "face.redact",
+                "parameters": {"chunk_frames": swap_parameters.get("chunk_frames", 32)},
+                "inputs": shared
+                | swapped
+                | {
+                    "audit": node("validate", "audit"),
+                    "validation": node("validate", "summary"),
+                },
+            },
+            {
+                "id": "export",
+                "module": "video.export",
+                "parameters": export_parameters or {},
+                "inputs": shared
+                | references
+                | {
+                    "video": external("video"),
+                    "inspection": node("inspect", "manifest"),
+                    "swap_records": node("swap", "records"),
+                    **{
+                        key: node("redact", key)
+                        for key in ("frames", "records", "summary")
+                    },
+                },
+            },
+        ]
+    )
+    definition["final"] = "export"
     return definition
