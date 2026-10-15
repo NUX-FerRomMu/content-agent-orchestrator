@@ -4,6 +4,13 @@ El comando `anonymize-video` usa A ya registrado y B ya aprobado. No crea ni
 cambia esas identidades. Produce un video nuevo; el original permanece intacto.
 La voz se conserva y podrá tratarse mediante otro módulo.
 
+Para el recorrido desde cero, incluyendo modelos y el asistente que arma el
+JSON, consultar [quickstart-local.md](quickstart-local.md). `models prepare-swap`
+descarga y verifica los dos ONNX de esta guía. `workflow create --interactive
+--output clip.job.json` prepara el DAG y sus bindings; `workflow run clip.job.json`
+lo ejecuta. `runs resume RUN_ID` recupera los snapshots/parametros originales
+desde SQLite sin tener que volver a escribirlos.
+
 ## Preparación y ejecución
 
 ```bash

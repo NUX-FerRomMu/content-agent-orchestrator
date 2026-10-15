@@ -40,7 +40,10 @@ def inspection_definition() -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Composable content pipelines")
+    parser = argparse.ArgumentParser(
+        description="Local composable video pipelines: register A, approve synthetic B, render validated video.",
+        epilog="Start: content-agent init; content-agent doctor; content-agent workflow create --help. Full guide: docs/quickstart-local.md",
+    )
     parser.add_argument(
         "--root",
         type=Path,
@@ -52,6 +55,7 @@ def main(argv: list[str] | None = None) -> int:
         help="User storage directory (or CONTENT_AGENT_HOME)",
     )
     commands = parser.add_subparsers(dest="command", required=True)
+    _workflow_parsers(commands)
     inspect = commands.add_parser(
         "inspect", help="Inspect a video and export its report"
     )
@@ -174,8 +178,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     actions = identity.add_subparsers(dest="identity_action", required=True)
     register = actions.add_parser("register")
-    register.add_argument("--embeddings", type=Path, required=True)
-    register.add_argument("--summary", type=Path, required=True)
+    register.add_argument("--embeddings", type=Path)
+    register.add_argument("--summary", type=Path)
+    register.add_argument(
+        "--from-run", help="Read verified private embeddings from an execution ID"
+    )
     register.add_argument("--track", required=True)
     target = register.add_mutually_exclusive_group()
     target.add_argument("--alias")
@@ -184,6 +191,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     register.add_argument("--min-similarity", type=float, default=0.65)
     actions.add_parser("list")
+    tracks = actions.add_parser(
+        "tracks", help="List tracks and usable observations for explicit enrollment"
+    )
+    tracks.add_argument("--run", required=True)
     actions.add_parser("snapshot")
     delete = actions.add_parser("delete")
     delete.add_argument("identity_id")
@@ -201,6 +212,19 @@ def main(argv: list[str] | None = None) -> int:
     try:
         registry = builtin_registry()
         storage = UserStorage(args.root)
+        if args.command in {
+            "init",
+            "doctor",
+            "models",
+            "artifacts",
+            "profile",
+            "workflow",
+            "runs",
+            "modules",
+        }:
+            payload = _workflow_command(args, storage, registry)
+            print(json.dumps(payload, indent=2))
+            return 1 if args.command == "doctor" and not payload["ready"] else 0
         if args.command == "virtual" and args.virtual_action == "prepare-model":
             path = prepare_model(storage, args.model, args.revision)
             print(
@@ -252,6 +276,22 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "identity":
             identities = IdentityRegistry(storage)
             if args.identity_action == "register":
+                if args.from_run:
+                    if args.embeddings is not None or args.summary is not None:
+                        raise PipelineError(
+                            "Use --from-run or both --embeddings and --summary"
+                        )
+                    from .workflow import embedding_artifacts
+
+                    artifacts = embedding_artifacts(storage, registry, args.from_run)
+                    args.embeddings, args.summary = (
+                        artifacts["frames"].path,
+                        artifacts["summary"].path,
+                    )
+                elif args.embeddings is None or args.summary is None:
+                    raise PipelineError(
+                        "Provide --from-run or both --embeddings and --summary"
+                    )
                 payload = identities.enroll(
                     args.embeddings,
                     args.summary,
@@ -262,6 +302,10 @@ def main(argv: list[str] | None = None) -> int:
                 )
             elif args.identity_action == "list":
                 payload = identities.list_identities()
+            elif args.identity_action == "tracks":
+                from .workflow import track_summary
+
+                payload = track_summary(storage, registry, args.run)
             elif args.identity_action == "snapshot":
                 payload = {"path": str(identities.snapshot())}
             else:
@@ -407,6 +451,179 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         print("Interrupted; temporaries and checkpoints are retained", file=sys.stderr)
         return 130
+
+
+def _workflow_parsers(commands):
+    """Describe preparation, editable saved jobs and checkpoint recovery."""
+    commands.add_parser(
+        "init", help="Create private artifacts, temps, outputs and state directories"
+    )
+    doctor = commands.add_parser(
+        "doctor",
+        help="Check tools, optional runtimes and model checksums without downloading",
+    )
+    doctor.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
+    doctor.add_argument(
+        "--generation",
+        action="store_true",
+        help="Also check the optional local SDXL runtime",
+    )
+    doctor.add_argument(
+        "--models", action="store_true", help="Also verify prepared native swap weights"
+    )
+    models = commands.add_parser("models", help="Explicit verified model preparation")
+    models.add_subparsers(dest="models_action", required=True).add_parser(
+        "prepare-swap",
+        help="Download pinned InSwapper128 + ArcFace weights (~696 MiB); keep completed files on retry",
+    )
+    artifacts = commands.add_parser("artifacts", help="Manage initial user artifacts")
+    importer = artifacts.add_subparsers(
+        dest="artifacts_action", required=True
+    ).add_parser(
+        "import",
+        help="Copy a video to raw_footages with a content hash; preserve the original",
+    )
+    importer.add_argument("video", type=Path)
+    profile = commands.add_parser(
+        "profile", help="Create the explicit adult synthetic appearance profile"
+    )
+    creator = profile.add_subparsers(dest="profile_action", required=True).add_parser(
+        "create"
+    )
+    creator.add_argument("--output", type=Path, required=True)
+    creator.add_argument("--interactive", action="store_true")
+    creator.add_argument("--gender", choices=("woman", "man", "androgynous"))
+    creator.add_argument(
+        "--skin-tone", type=int, help="Explicit Monk skin tone 1 (light) to 10 (dark)"
+    )
+    creator.add_argument(
+        "--undertone", choices=("neutral", "warm", "cool"), default="neutral"
+    )
+    creator.add_argument("--age-years", type=int, default=35)
+    creator.add_argument(
+        "--features",
+        default="",
+        help="Cosmetic preferences, e.g. natural makeup and subtle eyeliner",
+    )
+    workflow = commands.add_parser(
+        "workflow", help="Build and run a saved JSON job with a DAG and frozen inputs"
+    )
+    workflows = workflow.add_subparsers(dest="workflow_action", required=True)
+    builder = workflows.add_parser(
+        "create",
+        help="Assemble the full video pipeline; requires registered A and approved B",
+    )
+    builder.add_argument(
+        "--output",
+        type=Path,
+        required=True,
+        help="New JSON job; existing files are never overwritten",
+    )
+    builder.add_argument(
+        "--interactive",
+        action="store_true",
+        help="Ask for video, CPU/CUDA and final codec",
+    )
+    builder.add_argument("--video", type=Path)
+    builder.add_argument(
+        "--swap-model",
+        type=Path,
+        help="Default: pinned weights from models prepare-swap",
+    )
+    builder.add_argument("--arcface-model", type=Path)
+    builder.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
+    builder.add_argument("--codec", choices=("h264", "ffv1"), default="h264")
+    builder.add_argument("--crf", type=int, default=18)
+    builder.add_argument("--chunk-frames", type=int, default=32)
+    builder.add_argument("--timeout-seconds", type=int, default=600)
+    builder.add_argument("--allow-all-redacted", action="store_true")
+    executor = workflows.add_parser(
+        "run", help="Execute the saved job after verifying all frozen input hashes"
+    )
+    executor.add_argument("job", type=Path)
+    executor.add_argument("--cache", choices=("reuse", "fresh"), default="reuse")
+    runs = commands.add_parser(
+        "runs",
+        help="Discover execution IDs, outputs, failures and recoverable checkpoints",
+    )
+    run_actions = runs.add_subparsers(dest="runs_action", required=True)
+    listing = run_actions.add_parser("list")
+    listing.add_argument("--limit", type=int, default=20)
+    show = run_actions.add_parser("show")
+    show.add_argument("run_id")
+    resume = run_actions.add_parser(
+        "resume",
+        help="Reuse the original recorded DAG, paths and parameters; no manual snapshots needed",
+    )
+    resume.add_argument("run_id")
+    resume.add_argument("--cache", choices=("reuse", "fresh"), default="reuse")
+    commands.add_parser(
+        "modules",
+        help="List available module contracts for custom JSON DAG composition",
+    )
+
+
+def _workflow_command(args, storage, registry):
+    """Dispatch optional workflow helpers without coupling the runner to the CLI."""
+    from .workflow import (
+        create_profile,
+        create_workflow,
+        import_video,
+        inspect_runs,
+        load_workflow,
+        result_payload,
+        resume_run,
+    )
+
+    emit = lambda event: print(json.dumps(event), file=sys.stderr)
+    if args.command == "init":
+        storage.initialize()
+        return {
+            "storage_root": str(storage.root),
+            "directories": [
+                str(storage.path(name))
+                for name in ("artifacts/raw_footages", "temps", "outputs", "state")
+            ],
+        }
+    if args.command == "doctor":
+        from .diagnostics import diagnose
+
+        return diagnose(storage, args.device, args.generation, args.models)
+    if args.command == "models":
+        from .swap_models import prepare_swap_models
+
+        return {name: str(path) for name, path in prepare_swap_models(storage).items()}
+    if args.command == "artifacts":
+        return import_video(storage, args.video)
+    if args.command == "profile":
+        return create_profile(args)
+    if args.command == "modules":
+        return {
+            "modules": [
+                {
+                    "name": module.name,
+                    "version": module.version,
+                    "inputs": dict(module.input_kinds),
+                    "outputs": dict(module.output_kinds),
+                    "can_be_final": getattr(module, "can_be_final", True),
+                }
+                for module in registry.values()
+            ]
+        }
+    if args.command == "workflow":
+        if args.workflow_action == "create":
+            return create_workflow(args, storage, registry)
+        pipeline, inputs = load_workflow(args.job, storage, registry)
+        return result_payload(
+            Runner(storage, registry, emit=emit).run(pipeline, inputs, cache=args.cache)
+        )
+    if args.runs_action == "resume":
+        return result_payload(
+            resume_run(storage, registry, args.run_id, cache=args.cache, emit=emit)
+        )
+    return inspect_runs(
+        storage, getattr(args, "run_id", None), getattr(args, "limit", 20)
+    )
 
 
 def face_analysis_definition(

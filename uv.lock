@@ -3,10 +3,10 @@ revision = 5
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.14' and extra != 'group-26-content-agent-orchestrator-swap' and extra == 'group-26-content-agent-orchestrator-swap-cuda'",
-    "python_full_version == '3.13.*' and extra != 'group-26-content-agent-orchestrator-swap' and extra == 'group-26-content-agent-orchestrator-swap-cuda'",
-    "python_full_version < '3.13' and extra != 'group-26-content-agent-orchestrator-swap' and extra == 'group-26-content-agent-orchestrator-swap-cuda'",
     "python_full_version >= '3.14' and extra == 'group-26-content-agent-orchestrator-swap' and extra != 'group-26-content-agent-orchestrator-swap-cuda'",
+    "python_full_version == '3.13.*' and extra != 'group-26-content-agent-orchestrator-swap' and extra == 'group-26-content-agent-orchestrator-swap-cuda'",
     "python_full_version == '3.13.*' and extra == 'group-26-content-agent-orchestrator-swap' and extra != 'group-26-content-agent-orchestrator-swap-cuda'",
+    "python_full_version < '3.13' and extra != 'group-26-content-agent-orchestrator-swap' and extra == 'group-26-content-agent-orchestrator-swap-cuda'",
     "python_full_version < '3.13' and extra == 'group-26-content-agent-orchestrator-swap' and extra != 'group-26-content-agent-orchestrator-swap-cuda'",
     "extra != 'group-26-content-agent-orchestrator-swap' and extra != 'group-26-content-agent-orchestrator-swap-cuda'",
 ]
@@ -224,7 +224,7 @@ wheels = [
 [[package]]
 name = "content-agent-orchestrator"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "numpy" },
     { name = "opencv-python-headless" },

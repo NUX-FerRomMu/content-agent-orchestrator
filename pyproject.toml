@@ -8,6 +8,16 @@ dependencies = [
     "opencv-python-headless>=4.10,<5",
 ]
 
+[project.scripts]
+content-agent = "content_agent_orchestrator.cli:main"
+
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/content_agent_orchestrator"]
+
 [dependency-groups]
 dev = [
     "ruff>=0.16.8",
