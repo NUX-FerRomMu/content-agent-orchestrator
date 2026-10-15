@@ -5,6 +5,7 @@ import json
 import os
 import re
 import shutil
+import sys
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -199,6 +200,11 @@ def _download(url: str, path: Path, record: dict) -> None:
     # Completed files are reused; incomplete downloads restart, never get blessed.
     partial.unlink(missing_ok=True)
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    print(
+        f"Downloading {record['path']} ({record['size_bytes']} bytes); verifying upstream checksum",
+        file=sys.stderr,
+        flush=True,
+    )
     try:
         with (
             urllib.request.build_opener(ModelRedirect()).open(
@@ -209,11 +215,19 @@ def _download(url: str, path: Path, record: dict) -> None:
             if os.name != "nt":
                 os.fchmod(output.fileno(), 0o600)
             size = 0
+            progress = 0
             while block := response.read(1024 * 1024):
                 size += len(block)
                 if size > record["size_bytes"]:
                     raise ExecutionError("Model download exceeds declared size")
                 output.write(block)
+                if size - progress >= 64 * 1024**2:
+                    print(
+                        f"{record['path']}: {size}/{record['size_bytes']} bytes",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    progress = size
             output.flush()
             os.fsync(output.fileno())
         if (

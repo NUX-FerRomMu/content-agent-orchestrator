@@ -7,6 +7,24 @@ y generar identidades virtuales persistentes. Puede reemplazar rostros con un
 motor local, ocultar frames que no superan la validación de privacidad y
 publicar el video solamente después de comprobar también los píxeles codificados.
 
+**Para llegar desde cero al video final:** seguir la
+[guía local paso a paso](docs/quickstart-local.md), con instalación CPU/NVIDIA,
+descarga verificada de modelos, alta de A, generación/aprobación de B,
+asistentes interactivos y recuperación de caché.
+
+```bash
+uv sync --locked --group generation --group swap-cuda  # NVIDIA; usar swap para CPU
+source .venv/bin/activate
+export CONTENT_AGENT_HOME="$HOME/influencer-data"
+content-agent init
+content-agent --help
+```
+
+Una vez preparadas A y B, `content-agent workflow create --interactive --output
+clip.job.json` arma el pipeline y congela sus inputs. `content-agent workflow
+run clip.job.json` genera el video; `content-agent runs resume RUN_ID` recupera
+una corrida fallida con sus parámetros y snapshots originales.
+
 ## Requisitos y preparación
 
 - Python 3.12, según `.python-version`.
@@ -18,12 +36,13 @@ Desde la carpeta del repositorio:
 
 ```bash
 uv sync --locked
-export PYTHONPATH=src
+source .venv/bin/activate
 ```
 
-En PowerShell, usar `$env:PYTHONPATH = "src"` en lugar de `export`. El proyecto
-usa `.venv`, NumPy y OpenCV headless, con versiones fijadas en `uv.lock`. Al no tener todavía un
-backend de empaquetado, `PYTHONPATH=src` permite ejecutar el paquete desde el checkout.
+En PowerShell, usar `.venv\Scripts\Activate.ps1` para activar. El proyecto
+usa `.venv`, NumPy y OpenCV headless, con versiones fijadas en `uv.lock`.
+El paquete instalado provee `content-agent`; también admite `python -m
+content_agent_orchestrator`, sin configurar `PYTHONPATH`.
 
 ## Directorio del usuario
 
@@ -34,7 +53,8 @@ El contenido del usuario queda fuera del checkout:
 ```text
 <root>/
 ├── artifacts/
-│   ├── raw_footages/                      # videos fuente
+│   ├── raw_footages/                      # videos fuente; artifacts import
+│   ├── models/                            # pesos preparados/verificados
 │   ├── runs/<run_id>/<node>/<attempt>/    # resultados intermedios privados
 │   ├── identity_registry/<sha256>.json    # snapshots biométricos privados
 │   ├── virtual_candidates/<hash>/        # rostros B pendientes de revisión
@@ -54,6 +74,9 @@ del JSON del pipeline, se interpretan respecto del directorio de trabajo**.
 `--root` define el almacenamiento de resultados y estado; no cambia la base de
 las rutas de inputs. La CLI crea las carpetas de almacenamiento que falten.
 No admite inputs procedentes de `temps/` ni de `state/`.
+`artifacts import VIDEO` crea una copia verificada y privada del original en
+`raw_footages/`. Los jobs de `workflow create` guardan rutas absolutas y hashes;
+se ejecutan con `workflow run`, conservando la raíz original.
 
 ## Inspeccionar un video
 
